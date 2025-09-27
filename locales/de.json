@@ -1,0 +1,40 @@
+{
+  "brand_hello": "✨🕊️ Willkommen bei *EverGrace by RABE* ✨\n\nDein sanfter Begleiter, dein sicherer Raum, dein täglicher Funke der Inspiration.\n\nHier ist jedes Wort ein Same: Gemeinsam lassen wir Erinnerungen, Taten und Zukunft wachsen.",
+  "choose_lang": "🌍 Wähle nun die Sprache, mit der du diese Reise gehen möchtest:",
+  "choose_goal": "Worum geht es dir jetzt?",
+  "goals": ["Frieden", "Disziplin", "Glaube", "Familie", "anderes"],
+  "onboard_done": "Wunderschön. Ich merke es mir. Tippe /daily oder nutze das Menü, um zu starten.",
+  "menu": "Hier ist dein Menü:",
+  "btn_daily": "🌅 Morgen",
+  "btn_evening": "🌙 Abend",
+  "btn_sos": "🆘 SOS",
+  "btn_legacy": "📝 Legacy-Notiz",
+  "btn_settings": "⚙️ Einstellungen",
+
+  "btn_lang": "🌍 Sprache",
+  "btn_goal": "🎯 Ziel",
+  "btn_chat_on": "🗣️ Chat AN",
+  "btn_chat_off": "🤫 Chat AUS",
+
+  "ask_legacy": "Schreibe eine kurze Erinnerung oder Reflexion. Ich speichere sie für deine Legacy.",
+  "saved_legacy": "In deiner Legacy gespeichert. Gut gemacht!",
+  "sos_hint": "Sag mir in einem Satz, wie du dich fühlst, und ich antworte ruhig.",
+  "set_lang": "Sprache aktualisiert.",
+  "pick_lang": "Wähle eine Sprache:",
+  "pick_goal": "Wähle dein Ziel:",
+
+  "chat_enabled": "🟣 Gesprächsmodus AKTIV. Sprich frei mit mir.",
+  "chat_disabled": "🔇 Gesprächsmodus AUS. Nutze das Menü oder Befehle.",
+  "chat_ack": "✅ Ich höre dich. Das habe ich verstanden:",
+  "chat_followup": "Soll ich es in eine kleine Aktion für heute verwandeln, oder möchtest du lieber einen /daily Vorschlag?",
+  "chat_retry": "Ups, ein kleiner Hänger. Wollen wir es nochmal versuchen?",
+
+  "emo_stressed": "Stress fühlt sich schwer an. Erde dich mit deinen 5 Sinnen: 5 die du siehst, 4 die du berührst, 3 die du hörst, 2 die du riechst, 1 die du schmeckst.",
+  "emo_tired": "Du wirkst müde. Versuche 2 Minuten Box-Atmung: 4 einatmen, 4 halten, 4 ausatmen, 4 halten. Danach eine freundliche Geste für dich.",
+  "emo_anxious": "Angst markiert eine Grenze. Schreibe *eine* kleine Sache, die du jetzt schützen kannst – atme, antworte später.",
+  "emo_sad": "Es tut mir leid für diesen Moment. Ein warmer Tee und eine Notiz in deiner Legacy?",
+  "emo_overwhelm": "Überfordert? Wähle *einen* winzigen Schritt, den du 5 Minuten lang tun kannst.",
+  "emo_happy": "Wie schön! Halte den Moment fest. Eine kurze Legacy-Notiz, damit dieses Licht bleibt.",
+  "emo_grateful": "Dankbarkeit erhellt. Wem oder wofür bist du heute dankbar? Eine Zeile in deiner Legacy?",
+  "emo_default": "Ich bin da. Sag mir kurz, was jetzt am wichtigsten ist – ich kann eine Mikro-Aktion oder /daily vorschlagen."
+}
