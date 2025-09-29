@@ -1,5 +1,27 @@
-.env
+
 node_modules/
 users.json
 *.log
+
+# Node.js dependencies
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# Env and secrets
+.env
+test_env.js
+test_supabase_connection.js
+
+# Logs
+logs
+*.log
+*.log.*
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# Editor folders
+.vscode/
+.idea/
