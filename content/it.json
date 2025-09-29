@@ -1,0 +1,83 @@
+{
+  "morning": [
+    {
+      "title": "Giorno 1 – Respiro & Intenzione",
+      "text": "Schiena dritta. Respiro 4-2-4 ×4. Sussurra un’intenzione.",
+      "action": "Scrivi una micro‑vittoria da chiudere entro mezzogiorno."
+    },
+    {
+      "title": "Giorno 2 – Gratitudine 3",
+      "text": "Nomina 3 cose: corpo, persona, opportunità.",
+      "action": "Manda un grazie a una persona."
+    },
+    {
+      "title": "Giorno 3 – Centro & Verso",
+      "text": "Occhi chiusi; mano sul cuore 30 sec. Ricorda un verso/citazione.",
+      "action": "Metti quella frase nelle note del telefono."
+    },
+    {
+      "title": "Giorno 4 – Focus Uno",
+      "text": "Scegli UNA cosa davvero importante. Visualizza il traguardo.",
+      "action": "Blocca 20 min ora per farla."
+    },
+    {
+      "title": "Giorno 5 – Gentilezza Prima",
+      "text": "Pianifica un gesto gentile.",
+      "action": "Inseriscilo in agenda."
+    },
+    {
+      "title": "Giorno 6 – Risveglio Corpo",
+      "text": "Allunga collo/spalle/schiena per 60 sec.",
+      "action": "Bevi un bicchiere d’acqua."
+    },
+    {
+      "title": "Giorno 7 – Rivedi & Reset",
+      "text": "Rivedi la settimana: cosa ti ha sollevato?",
+      "action": "Scegli una parola‑tema per la prossima."
+    }
+  ],
+  "evening": [
+    {
+      "title": "Giorno 1 – 3 Respirazioni",
+      "text": "Espira lenta; lascia cadere le spalle.",
+      "action": "Annota 1 lezione di oggi."
+    },
+    {
+      "title": "Giorno 2 – Punto di Gioia",
+      "text": "Ricorda un piccolo punto di gioia.",
+      "action": "Scrivilo nel diario Legacy."
+    },
+    {
+      "title": "Giorno 3 – Lasciare Andare",
+      "text": "Nomina una preoccupazione; lasciala per stanotte.",
+      "action": "Parcheggiala per domani con un primo passo."
+    },
+    {
+      "title": "Giorno 4 – Ricordo Gentile",
+      "text": "Rivivi un momento di gentilezza.",
+      "action": "Manda un grazie o prometti di ripeterlo."
+    },
+    {
+      "title": "Giorno 5 – Body Scan",
+      "text": "Scansione dalla testa ai piedi in 30 sec.",
+      "action": "Sciogli la mandibola; rilassa le mani."
+    },
+    {
+      "title": "Giorno 6 – Registro Vittorie",
+      "text": "Elenca 2 vittorie, anche piccole.",
+      "action": "Festeggia in silenzio con un respiro profondo."
+    },
+    {
+      "title": "Giorno 7 – Preghiera di Chiusura",
+      "text": "Offri la giornata: bello e faticoso.",
+      "action": "Intenzione del sonno: ‘Riposo e mi rinnovo.’"
+    }
+  ],
+  "sos": [
+    "Mano sul cuore. Inspira 4, tieni 2, espira 6 ×3.",
+    "Nomina 3 cose che vedi, 2 che senti, 1 che percepisci.",
+    "Di’: ‘Questo momento passa. Ora sono al sicuro.’",
+    "Bevi acqua. Allunga l’espirazione.",
+    "Scegli un prossimo passo che controlli in 60 sec."
+  ]
+}

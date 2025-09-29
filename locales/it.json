@@ -1,0 +1,40 @@
+{
+  "brand_hello": "✨🕊️ Benvenuto in *EverGrace by RABE* ✨\n\nLa tua guida gentile, il tuo spazio sicuro, la tua scintilla quotidiana di ispirazione.\n\nQui ogni parola è un seme: coltiviamo insieme ricordi, azioni e futuro.",
+  "choose_lang": "🌍 Ora scegli la lingua con cui vuoi camminare questo viaggio:",
+  "choose_goal": "Qual è il tuo focus ora?",
+  "goals": ["pace", "disciplina", "fede", "famiglia", "altro"],
+  "onboard_done": "Bellissimo. Lo terrò a mente. Scrivi /daily o usa il menu per iniziare.",
+  "menu": "Ecco il tuo menu:",
+  "btn_daily": "🌅 Mattino",
+  "btn_evening": "🌙 Sera",
+  "btn_sos": "🆘 SOS",
+  "btn_legacy": "📝 Nota Legacy",
+  "btn_settings": "⚙️ Impostazioni",
+
+  "btn_lang": "🌍 Lingua",
+  "btn_goal": "🎯 Obiettivo",
+  "btn_chat_on": "🗣️ Chat ON",
+  "btn_chat_off": "🤫 Chat OFF",
+
+  "ask_legacy": "Scrivi un breve ricordo o riflessione. Lo salvo per la tua legacy.",
+  "saved_legacy": "Salvato nella tua legacy. Bravissima/o!",
+  "sos_hint": "Dimmi in una riga come ti senti e risponderò con calma.",
+  "set_lang": "Lingua aggiornata.",
+  "pick_lang": "Scegli la lingua:",
+  "pick_goal": "Scegli il tuo obiettivo:",
+
+  "chat_enabled": "🟣 Modalità conversazione ATTIVA. Parlami liberamente.",
+  "chat_disabled": "🔇 Modalità conversazione SPENTA. Usa il menu o i comandi.",
+  "chat_ack": "✅ Ti ascolto. Ho capito questo:",
+  "chat_followup": "Vuoi che lo trasformi in una micro-azione per oggi, o preferisci un suggerimento con /daily?",
+  "chat_retry": "Scusa, ho avuto un piccolo problema. Proviamo ancora?",
+
+  "emo_stressed": "Lo stress pesa. Ancorati ai 5 sensi: 5 che vedi, 4 che tocchi, 3 che senti, 2 che annusi, 1 che assapori.",
+  "emo_tired": "Sembri stanco/a. Concediti 2 minuti di respiro profondo: 4\" inspira, 4\" pausa, 4\" espira, 4\" pausa. Poi un piccolo gesto di gentilezza.",
+  "emo_anxious": "L’ansia segna il confine. Scrivi *una* cosa piccola che puoi proteggere, poi respira e rispondi solo dopo.",
+  "emo_sad": "Mi spiace per questo momento. Aggiungi un tocco di delicatezza. Una tazza calda e una frase per te nella legacy?",
+  "emo_overwhelm": "Ti senti sopraffatta/o. Radicati: scegli *una* cosa piccola che puoi fare ora per 5 minuti.",
+  "emo_happy": "Che bello! Fissa il momento. Una nota rapida nella legacy, così questa luce resta?",
+  "emo_grateful": "La gratitudine illumina. A chi o a cosa dici grazie oggi? Una frase nella legacy?",
+  "emo_default": "Ti ascolto. Dimmi in poche parole cosa conta per te adesso — posso suggerire una micro-azione o /daily."
+}

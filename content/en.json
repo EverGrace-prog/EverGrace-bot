@@ -1,0 +1,83 @@
+{
+  "morning": [
+    {
+      "title": "Day 1 – Breathe & Intend",
+      "text": "Sit tall. Breathe 4-2-4 ×4. Whisper one intention for today.",
+      "action": "Write one tiny win you’ll secure before noon."
+    },
+    {
+      "title": "Day 2 – Gratitude 3",
+      "text": "Name 3 things: one body, one person, one opportunity.",
+      "action": "Send a thank‑you message to one person."
+    },
+    {
+      "title": "Day 3 – Center & Verse",
+      "text": "Close eyes; hand on heart for 30 sec. Recall a calming verse/quote.",
+      "action": "Place that quote as your phone note."
+    },
+    {
+      "title": "Day 4 – Focus One",
+      "text": "Choose ONE task that truly matters. Visualize finishing it.",
+      "action": "Block 20 min for it now."
+    },
+    {
+      "title": "Day 5 – Kindness First",
+      "text": "Plan one kind act (call, smile, help).",
+      "action": "Schedule it in your calendar."
+    },
+    {
+      "title": "Day 6 – Body Wake",
+      "text": "Stretch neck/shoulders/back gently for 60 sec.",
+      "action": "Drink a full glass of water."
+    },
+    {
+      "title": "Day 7 – Review & Reset",
+      "text": "Review the week: what lifted you most?",
+      "action": "Set one theme word for next week."
+    }
+  ],
+  "evening": [
+    {
+      "title": "Day 1 – 3 Breaths",
+      "text": "Exhale slowly; let shoulders drop.",
+      "action": "Note 1 lesson learned today."
+    },
+    {
+      "title": "Day 2 – Gratitude Dot",
+      "text": "Recall a small ‘dot’ of joy.",
+      "action": "Write it in Legacy diary."
+    },
+    {
+      "title": "Day 3 – Release",
+      "text": "Name one worry; release it for tonight.",
+      "action": "Park it for tomorrow with a first step."
+    },
+    {
+      "title": "Day 4 – Kind Memory",
+      "text": "Replay a moment you were kind (or received kindness).",
+      "action": "Message a thank‑you or promise a repeat."
+    },
+    {
+      "title": "Day 5 – Body Scan",
+      "text": "Scan from head to toe in 30 sec.",
+      "action": "Unclench jaw; relax hands."
+    },
+    {
+      "title": "Day 6 – Win Log",
+      "text": "List 2 wins, however small.",
+      "action": "Celebrate silently with one deep breath."
+    },
+    {
+      "title": "Day 7 – Closing Prayer",
+      "text": "Offer the day: the good and the rough.",
+      "action": "Sleep intention: ‘I rest and renew.’"
+    }
+  ],
+  "sos": [
+    "Place a hand on heart. Inhale 4, hold 2, exhale 6 ×3.",
+    "Name 3 things you see, 2 you hear, 1 you feel.",
+    "Say: ‘This moment will pass. I am safe now.’",
+    "Drink water. Slow down your exhale.",
+    "Pick one next step you control in 60 sec."
+  ]
+}

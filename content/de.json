@@ -1,0 +1,83 @@
+{
+  "morning": [
+    {
+      "title": "Tag 1 – Atmen & Absicht",
+      "text": "Aufrecht sitzen. 4‑2‑4 ×4. Flüstere eine Absicht.",
+      "action": "Schreibe einen Mini‑Erfolg vor Mittag."
+    },
+    {
+      "title": "Tag 2 – Dankbarkeit 3",
+      "text": "Nenne 3 Dinge: Körper, Person, Chance.",
+      "action": "Sende einer Person ein Dankeschön."
+    },
+    {
+      "title": "Tag 3 – Mitte & Vers",
+      "text": "Augen zu; Hand aufs Herz 30 Sek. Beruhigendes Zitat/Vers.",
+      "action": "Lege das Zitat in deine Handynotizen."
+    },
+    {
+      "title": "Tag 4 – Fokus Eins",
+      "text": "Wähle EINE wirklich wichtige Sache. Stell dir das Ende vor.",
+      "action": "Blocke 20 Min jetzt dafür."
+    },
+    {
+      "title": "Tag 5 – Freundlichkeit zuerst",
+      "text": "Plane eine freundliche Tat.",
+      "action": "Trage sie in den Kalender ein."
+    },
+    {
+      "title": "Tag 6 – Körper wecken",
+      "text": "Nacken/Schultern/Rücken 60 Sek dehnen.",
+      "action": "Trinke ein Glas Wasser."
+    },
+    {
+      "title": "Tag 7 – Rückblick & Reset",
+      "text": "Woche prüfen: Was hat dich getragen?",
+      "action": "Wähle ein Wort‑Thema für nächste Woche."
+    }
+  ],
+  "evening": [
+    {
+      "title": "Tag 1 – 3 Atemzüge",
+      "text": "Langsam ausatmen; Schultern sinken lassen.",
+      "action": "Notiere 1 Lernpunkt von heute."
+    },
+    {
+      "title": "Tag 2 – Freude‑Punkt",
+      "text": "Erinnere dich an einen kleinen Freudenpunkt.",
+      "action": "Schreibe ihn ins Legacy‑Tagebuch."
+    },
+    {
+      "title": "Tag 3 – Loslassen",
+      "text": "Benenne eine Sorge; gib sie für heute ab.",
+      "action": "Parke sie für morgen mit einem ersten Schritt."
+    },
+    {
+      "title": "Tag 4 – Freundlicher Moment",
+      "text": "Spule einen Moment der Freundlichkeit ab.",
+      "action": "Sende ein Dankeschön oder kündige eine Wiederholung an."
+    },
+    {
+      "title": "Tag 5 – Körperscan",
+      "text": "30 Sek von Kopf bis Fuß scannen.",
+      "action": "Kiefer lösen; Hände entspannen."
+    },
+    {
+      "title": "Tag 6 – Erfolge",
+      "text": "Liste 2 Erfolge – auch kleine.",
+      "action": "Feiere still mit einem tiefen Atemzug."
+    },
+    {
+      "title": "Tag 7 – Abschlussgebet",
+      "text": "Übergib den Tag: hell und rau.",
+      "action": "Schlaf‑Absicht: ‘Ich ruhe und erneuere mich.’"
+    }
+  ],
+  "sos": [
+    "Hand aufs Herz. Einatmen 4, halten 2, ausatmen 6 ×3.",
+    "Benenne 3 Dinge, die du siehst; 2 hörst; 1 fühlst.",
+    "Sage: ‘Dieser Moment geht vorüber. Ich bin jetzt sicher.’",
+    "Trinke Wasser. Verlängere das Ausatmen.",
+    "Wähle einen nächsten Schritt, den du in 60 Sek. kontrollierst."
+  ]
+}

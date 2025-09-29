@@ -1,0 +1,390 @@
+
+// index.js — EverGrace (pulito + persistenza + chat OpenAI)
+
+// 1) Imports
+import 'dotenv/config';
+import fetch from 'node-fetch';
+import { Telegraf, Markup } from 'telegraf';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import OpenAI from 'openai';
+
+// 2) __dirname per ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname  = path.dirname(__filename);
+
+// 3) Env
+const BOT_TOKEN      = process.env.BOT_TOKEN;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+if (!BOT_TOKEN)      { console.error('Missing BOT_TOKEN in .env'); process.exit(1); }
+if (!OPENAI_API_KEY) { console.error('Missing OPENAI_API_KEY in .env'); process.exit(1); }
+
+// 4) Istanza bot + OpenAI
+const bot    = new Telegraf(BOT_TOKEN);
+const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+
+// 5) Session in memoria
+// user state: { lang:'it'|'en'|'de', chatEnabled:boolean, goal?:string, journal:[], journalSeq:number, name?:string, pendingFollowup?:boolean }
+const session = new Map();
+
+// 6) Persistenza su file (users.json)
+const USERS_PATH = path.join(__dirname, 'users.json');
+
+function loadUsersFromDisk() {
+  try {
+    if (fs.existsSync(USERS_PATH)) {
+      const raw = fs.readFileSync(USERS_PATH, 'utf8');
+      const data = JSON.parse(raw || '{}');
+      for (const [chatId, state] of Object.entries(data)) {
+        session.set(Number(chatId), state);
+      }
+      console.log(`Loaded ${session.size} user(s) from users.json`);
+    }
+  } catch (e) {
+    console.error('Failed to load users.json:', e);
+  }
+}
+
+let saveTimer = null;
+function scheduleSave() {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try {
+      const obj = {};
+      for (const [chatId, state] of session.entries()) obj[chatId] = state;
+      const tmp = USERS_PATH + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8');
+      fs.renameSync(tmp, USERS_PATH); // write atomico
+    } catch (e) {
+      console.error('Failed to save users.json:', e);
+    }
+  }, 500);
+}
+
+// carica all’avvio
+loadUsersFromDisk();
+
+// 7) Locales (stringhe minime; se hai già /locales/*.json puoi caricarli da file)
+const locales = {
+  it: {
+    welcomeTitle: '✨✨ Benvenuto in *EverGrace by RABE* ✨✨',
+    pickLang: '🌍 Ora scegli la lingua:',
+    menu: 'Ecco il tuo menu:',
+    btnMorning: '🌅 Mattino',
+    btnEvening: '🌙 Sera',
+    btnSOS: '🆘 SOS',
+    btnLegacy: '📝 Nota Legacy',
+    btnSettings: '⚙️ Impostazioni',
+    settingsTitle: 'Impostazioni',
+    lang: 'Language',
+    goal: 'Goal',
+    chatOn: '🗣️ Chat ON',
+    chatOff: '🤫 Chat OFF',
+    chatIsOn: '🟣 Conversation mode is ON. Talk to me freely.',
+    chatIsOff: '🔇 Modalità conversazione SPENTA. Usa il menu o i comandi.',
+    logoMissing: 'Logo non trovato nel progetto (rabe_logo.png).',
+    journalEmpty: 'Il tuo diario è vuoto.',
+    journalTitle: '🗂️ Diario (ultimi 10):',
+    saved: 'Fatto!',
+  },
+  en: {
+    welcomeTitle: '✨✨ Welcome to *EverGrace by RABE* ✨✨',
+    pickLang: '🌍 Please choose your language:',
+    menu: 'Here’s your menu:',
+    btnMorning: '🌅 Morning',
+    btnEvening: '🌙 Evening',
+    btnSOS: '🆘 SOS',
+    btnLegacy: '📝 Legacy Note',
+    btnSettings: '⚙️ Settings',
+    settingsTitle: 'Settings',
+    lang: 'Language',
+    goal: 'Goal',
+    chatOn: '🗣️ Chat ON',
+    chatOff: '🤫 Chat OFF',
+    chatIsOn: '🟣 Conversation mode is ON. Talk to me freely.',
+    chatIsOff: '🔇 Conversation mode is OFF. Use menu or commands.',
+    logoMissing: 'Logo not found in project (rabe_logo.png).',
+    journalEmpty: 'Your journal is empty.',
+    journalTitle: '🗂️ Journal (last 10):',
+    saved: 'Done!',
+  },
+  de: {
+    welcomeTitle: '✨✨ Willkommen bei *EverGrace by RABE* ✨✨',
+    pickLang: '🌍 Wähle bitte deine Sprache:',
+    menu: 'Hier ist dein Menü:',
+    btnMorning: '🌅 Morgen',
+    btnEvening: '🌙 Abend',
+    btnSOS: '🆘 SOS',
+    btnLegacy: '📝 Legacy-Notiz',
+    btnSettings: '⚙️ Einstellungen',
+    settingsTitle: 'Einstellungen',
+    lang: 'Sprache',
+    goal: 'Ziel',
+    chatOn: '🗣️ Chat EIN',
+    chatOff: '🤫 Chat AUS',
+    chatIsOn: '🟣 Konversationsmodus ist EIN. Sprich frei mit mir.',
+    chatIsOff: '🔇 Konversationsmodus ist AUS. Nutze das Menü oder Befehle.',
+    logoMissing: 'Logo nicht gefunden (rabe_logo.png).',
+    journalEmpty: 'Dein Journal ist leer.',
+    journalTitle: '🗂️ Journal (letzte 10):',
+    saved: 'Gespeichert!',
+  },
+};
+
+// 8) Helpers
+function t(lang, key) {
+  return (locales[lang] && locales[lang][key]) || locales.en[key] || key;
+}
+function getUser(chatId) {
+  return session.get(chatId);
+}
+function ensureUser(chatId) {
+  let u = session.get(chatId);
+  if (!u) {
+    u = { lang: 'it', chatEnabled: false, goal: '', journal: [], journalSeq: 0, name: '' };
+    session.set(chatId, u);
+    scheduleSave();
+  }
+  return u;
+}
+function saveToJournal(u, role, text) {
+  u.journal.push({ id: ++u.journalSeq, role, text, ts: Date.now(), legacy: false });
+  // limitiamo a 500 voci per utente per evitare file enormi
+  if (u.journal.length > 500) u.journal = u.journal.slice(-500);
+  scheduleSave();
+}
+
+// 9) Keyboards
+function mainMenu(lang) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback(t(lang, 'btnMorning'), 'btn_morning'), Markup.button.callback(t(lang, 'btnEvening'), 'btn_evening')],
+    [Markup.button.callback(t(lang, 'btnSOS'), 'btn_sos'), Markup.button.callback(t(lang, 'btnLegacy'), 'btn_legacy')],
+    [Markup.button.callback(t(lang, 'btnSettings'), 'btn_settings')],
+  ]);
+}
+function settingsMenu(lang, chatOn) {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('🌐 ' + t(lang, 'lang'), 'open_lang'), Markup.button.callback('🎯 ' + t(lang, 'goal'), 'open_goal')],
+    [Markup.button.callback(chatOn ? t(lang, 'chatOff') : t(lang, 'chatOn'), 'toggle_chat')],
+    [Markup.button.callback('📒 Journal', 'open_journal')],
+  ]);
+}
+function langMenu() {
+  return Markup.inlineKeyboard([
+    [Markup.button.callback('🇮🇹 Italiano', 'set_lang:it')],
+    [Markup.button.callback('🇬🇧 English',  'set_lang:en')],
+    [Markup.button.callback('🇩🇪 Deutsch',  'set_lang:de')],
+  ]);
+}
+
+// 10) /start — benvenuto + logo + lingua + menu
+bot.start(async (ctx) => {
+  const chatId = ctx.chat.id;
+  const u = ensureUser(chatId);
+  // memorizziamo (se disponibile) il nome come "firstName lastName"
+  u.name = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ') || u.name || '';
+  scheduleSave();
+
+  const lang = u.lang || 'it';
+  const logoPath = path.join(__dirname, 'rabe_logo.png');
+  if (fs.existsSync(logoPath)) {
+    await ctx.replyWithPhoto({ source: logoPath });
+  } else {
+    await ctx.reply(t(lang, 'logoMissing'));
+  }
+
+  await ctx.replyWithMarkdown(t(lang, 'welcomeTitle'));
+  await ctx.reply(t(lang, 'pickLang'), langMenu());
+  await ctx.reply(t(lang, 'menu'), mainMenu(lang));
+  if (u.chatEnabled) {
+    await ctx.reply(t(lang, 'chatIsOn'));
+  } else {
+    await ctx.reply(t(lang, 'chatIsOff'));
+  }
+});
+
+// 11) Impostazioni: entry rapida
+bot.command('settings', async (ctx) => {
+  const u = ensureUser(ctx.chat.id);
+  await ctx.reply(t(u.lang, 'settingsTitle'), settingsMenu(u.lang, u.chatEnabled));
+});
+
+// 12) Journal quick command
+bot.command('journal', async (ctx) => {
+  const u = ensureUser(ctx.chat.id);
+  const lang = u.lang;
+  if (!u.journal.length) return ctx.reply(t(lang, 'journalEmpty'));
+  const last = u.journal.slice(-10);
+  const lines = last.map(e => {
+    const when = new Date(e.ts).toLocaleString();
+    return `• ${e.role.toUpperCase()} (${when}): ${e.text}`;
+  }).join('\n');
+  await ctx.replyWithMarkdown(`*${t(lang, 'journalTitle')}*\n${lines}`);
+});
+
+// 13) Settings: language
+bot.action('open_lang', async (ctx) => {
+  const u = ensureUser(ctx.chat.id);
+  await ctx.answerCbQuery();
+  await ctx.editMessageText(t(u.lang, 'pickLang'), langMenu());
+});
+bot.action(/set_lang:(.+)/, async (ctx) => {
+  const lang = ctx.match[1];
+  const u = ensureUser(ctx.chat.id);
+  await ctx.answerCbQuery();
+  u.lang = lang;
+  scheduleSave();
+  await ctx.editMessageText(t(lang, 'settingsTitle'), settingsMenu(lang, u.chatEnabled));
+});
+
+// 14) Settings: goal (dialogo semplice a step)
+const awaitingGoal = new Set();
+bot.action('open_goal', async (ctx) => {
+  const u = ensureUser(ctx.chat.id);
+  await ctx.answerCbQuery();
+  awaitingGoal.add(ctx.chat.id);
+  await ctx.reply('Dimmi il tuo obiettivo personale in una frase (es. “trovare pace interiore”).');
+});
+async function handleGoalInput(ctx, u) {
+  // chiamata quando siamo in attesa
+  const goal = ctx.message?.text?.trim();
+  if (!goal) return;
+  u.goal = goal;
+  awaitingGoal.delete(ctx.chat.id);
+  scheduleSave();
+  await ctx.reply(t(u.lang, 'saved') + ` ✅  (Goal: ${u.goal})`, settingsMenu(u.lang, u.chatEnabled));
+}
+
+// 15) Settings: toggle chat
+bot.action('toggle_chat', async (ctx) => {
+  const u = ensureUser(ctx.chat.id);
+  await ctx.answerCbQuery();
+  u.chatEnabled = !u.chatEnabled;
+  u.pendingFollowup = false;
+  scheduleSave();
+  await ctx.editMessageText(t(u.lang, 'settingsTitle'), settingsMenu(u.lang, u.chatEnabled));
+  await ctx.reply(u.chatEnabled ? t(u.lang, 'chatIsOn') : t(u.lang, 'chatIsOff'));
+});
+
+// 16) Journal UI
+bot.action('open_journal', async (ctx) => {
+  const u = ensureUser(ctx.chat.id);
+  await ctx.answerCbQuery();
+  if (!u.journal.length) return ctx.reply(t(u.lang, 'journalEmpty'));
+  const last = u.journal.slice(-10);
+  const lines = last.map(e => {
+    const when = new Date(e.ts).toLocaleString();
+    return `• ${e.role.toUpperCase()} (${when}): ${e.text}`;
+  }).join('\n');
+  await ctx.replyWithMarkdown(`*${t(u.lang, 'journalTitle')}*\n${lines}`);
+});
+
+// 17) Pulsanti menu (esempi semplici)
+bot.action('btn_morning', async (ctx) => {
+  const u = ensureUser(ctx.chat.id);
+  await ctx.answerCbQuery();
+  saveToJournal(u, 'system', '[Morning pressed]');
+  await ctx.reply('🌅 Buongiorno! Prenditi 30 secondi per respirare profondamente.');
+});
+bot.action('btn_evening', async (ctx) => {
+  const u = ensureUser(ctx.chat.id);
+  await ctx.answerCbQuery();
+  saveToJournal(u, 'system', '[Evening pressed]');
+  await ctx.reply('🌙 Buonasera! Rivedi un momento di gratitudine di oggi.');
+});
+bot.action('btn_sos', async (ctx) => {
+  const u = ensureUser(ctx.chat.id);
+  await ctx.answerCbQuery();
+  saveToJournal(u, 'system', '[SOS pressed]');
+  await ctx.reply('🆘 Sono qui. Un respiro: inspira 4, trattieni 4, espira 6. Ripeti 3 volte.');
+});
+bot.action('btn_legacy', async (ctx) => {
+  const u = ensureUser(ctx.chat.id);
+  await ctx.answerCbQuery();
+  saveToJournal(u, 'system', '[Legacy pressed]');
+  await ctx.reply('📝 Scrivi un messaggio a te stessa/o nel futuro. Inizia con “Caro/a me del futuro…”');
+});
+
+// 18) Conversazione libera (OpenAI) + goal-aware
+bot.on('text', async (ctx) => {
+  const chatId = ctx.chat.id;
+  const u = ensureUser(chatId);
+
+  // se stiamo aspettando il goal, gestiscilo qui
+  if (awaitingGoal.has(chatId)) {
+    return handleGoalInput(ctx, u);
+  }
+
+  const text = ctx.message.text?.trim();
+  if (!text) return;
+
+  // se chat OFF → messaggio di cortesia
+  if (!u.chatEnabled) {
+    await ctx.reply(t(u.lang, 'chatIsOff'));
+    return;
+  }
+
+  // prepara history breve (ultimo scambio + prompt di sistema)
+  const systemPrompt = [
+    `You are EverGrace, a gentle guide by RABE.`,
+    `Tone: warm, reflective, human; avoid repetition.`,
+    `If the user asks for tiny action vs /daily, ask at most once, then move on.`,
+    `User goal (optional): ${u.goal || '—'}.`,
+    `User name (optional): ${u.name || '—'}.`,
+    `Reply in the user's language (${u.lang}).`,
+  ].join(' ');
+
+  const lastUser = u.journal.filter(j => j.role === 'user').slice(-3);
+  const lastAssistant = u.journal.filter(j => j.role === 'assistant').slice(-3);
+  const recent = [];
+  // interleava un po’ (semplice)
+  lastUser.forEach((ju, i) => {
+    recent.push({ role: 'user', content: ju.text });
+    if (lastAssistant[i]) recent.push({ role: 'assistant', content: lastAssistant[i].text });
+  });
+
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    ...recent.slice(-4),
+    { role: 'user', content: text },
+  ];
+
+  try {
+    // salva input nel diario
+    saveToJournal(u, 'user', text);
+
+    // chiamata OpenAI — gpt-5-mini non supporta temperature custom → non impostiamo 'temperature'
+    const resp = await openai.chat.completions.create({
+      model: 'gpt-5-mini',
+      messages,
+      max_completion_tokens: 200, // OK per gpt-5-mini
+    });
+
+    const reply = resp.choices?.[0]?.message?.content?.trim() || '...';
+    saveToJournal(u, 'assistant', reply);
+    await ctx.reply(reply);
+  } catch (err) {
+    console.error('OpenAI error:', err?.response?.data || err.message);
+    await ctx.reply(u.lang === 'it' ? 'Scusa, ho avuto un piccolo problema. Proviamo ancora?' : 'Sorry, I had a small issue. Shall we try again?');
+  }
+});
+
+// 19) Webhook (se vuoi) oppure long polling
+const domain  = process.env.WEBHOOK_DOMAIN;
+const hookPath = process.env.WEBHOOK_PATH || '/webhook';
+const port     = process.env.PORT || 3000;
+
+if (domain) {
+  const url = `${domain}${hookPath}`;
+  bot.telegram.setWebhook(url).then(() => {
+    console.log('Webhook set:', url);
+    bot.startWebhook(hookPath, null, port);
+  });
+} else {
+  bot.launch().then(() => console.log('Grace bot started in long polling mode'));
+}
+
+// 20) Shutdown pulito
+process.once('SIGINT',  () => bot.stop('SIGINT'));
+process.once('SIGTERM', () => bot.stop('SIGTERM'));
