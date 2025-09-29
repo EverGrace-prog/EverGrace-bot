@@ -1,27 +1,51 @@
+# ===============================
+# EverGrace Bot - Gitignore File
+# ===============================
 
-node_modules/
-users.json
-*.log
-
-# Node.js dependencies
-node_modules/
-npm-debug.log
-yarn-error.log
-
-# Env and secrets
+# 🔑 Chiavi e variabili sensibili
 .env
-test_env.js
-test_supabase_connection.js
+*.env
 
-# Logs
-logs
-*.log
-*.log.*
+# 📦 Dipendenze
+node_modules/
+package-lock.json
+yarn.lock
 
-# OS files
+# 🛠️ Build e distribuzione
+dist/
+build/
+exports/
+
+# 🧪 Test e file locali
+test_*.js
+*.test.js
+*.spec.js
+
+# 📄 File temporanei o locali
+UTF-8.txt
+users.json
+NUL
+
+# 🖥️ File di sistema (Windows / Mac / Linux)
 .DS_Store
 Thumbs.db
+ehthumbs.db
+desktop.ini
 
-# Editor folders
+# 🗂️ Log files
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 🧑‍💻 IDE/editor settings
 .vscode/
 .idea/
+*.swp
+*.swo
+*.swn
+*.bak
+*.tmp
+
+# 🗃️ Backup files
+*~
