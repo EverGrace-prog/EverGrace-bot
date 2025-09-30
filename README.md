@@ -1,51 +1,41 @@
-# Grace – Telegram Coach Bot (RABE/Legacy)
+# EverGrace Bot ✨
 
-Multilingual coach bot for **WhatsApp/Telegram vision**, here the Telegram MVP. Languages: **IT / EN / DE**.
-Focus: morning/evening routines, SOS moments, and the *Legacy* diary.
+EverGrace is a **personal Telegram coach, guide, and friend**.  
+It helps you set goals 🎯, keep a journal 📒, reflect spiritually 🙏, or simply talk 💬.
 
 ---
 
-## 1) Quick start (local)
+## 🌟 Features
 
-1. Install Node 18+ and run:
+- **📒 Journal**
+  - Daily notes
+  - Personal diary
+  - History of entries
+
+- **🎯 Goals / Coaching**
+  - Choose your style of support:
+    - 👥 Friend
+    - 🙏 Spiritual Guide
+    - 💪 Coach & Goals
+
+- **💬 Talk**
+  - Free conversation mode, where EverGrace just listens.
+
+- **🆘 SOS**
+  - Ask for immediate support.
+  - If you’re in danger, quick emergency contacts:
+    - 📞 112 (EU) | 911 (US)
+    - 🇮🇹 Samaritans: 06 77208977
+    - 🌐 [findahelpline.com](https://findahelpline.com)
+
+- **⚙️ Settings**
+  - Choose your language: English 🇬🇧, Italiano 🇮🇹, Deutsch 🇩🇪
+
+---
+
+## 🚀 Getting Started
+
+1. Clone the repository:
    ```bash
-   npm install
-   cp .env.example .env   # paste your bot token
-   npm run start
-   ```
-2. Talk to your bot on Telegram after creating it with **@BotFather**, paste the token into `.env`.
-
-> Default mode is **long polling** (works locally and on small VMs).
-
----
-
-## 2) Commands
-
-- `/start` – onboarding + language (IT/EN/DE) + goal.
-- `/daily` – Morning routine (2 min).
-- `/evening` – Evening routine (2 min).
-- `/sos` – Short, compassionate guidance.
-- `/legacy` – Save a memory/note for your legacy diary.
-- `/settings` – Change language, timezone, goal, notification time.
-- `/help` – Menu + tips.
-
-The bot uses **inline keyboards** and saves state in memory; persistence stubs are included for **Supabase**.
-
----
-
-## 3) Deploy (Railway/Render/Fly)
-
-- Easiest: run long polling on a small dyno (no webhooks needed).
-- For webhooks, set `WEBHOOK_DOMAIN` (e.g., your Render URL) and the bot will self-register on start.
-
----
-
-## 4) Files
-
-- `index.js` – Bot logic (Telegraf).
-- `locales/*.json` – UI strings per language.
-- `content/*.json` – 7-day scripts for morning/evening and SOS per language.
-
----
-
-© 2025 RABE / Legacy – Grace.
+   git clone https://github.com/EverGrace-prog/EverGrace-bot.git
+   cd EverGrace-bot
