@@ -4,7 +4,6 @@
   "private": true,
   "description": "Grace – a multilingual (IT/EN/DE) Telegram coach bot for routines (Legacy/RABE).",
   "main": "index.js",
-  "type": "module",
   "scripts": {
     "start": "node index.js",
     "dev": "NODE_ENV=development node index.js"
