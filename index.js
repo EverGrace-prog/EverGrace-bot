@@ -1,109 +1,122 @@
-// index.js — EverGrace (CommonJS)
+// index.js  (CommonJS)
 
-// 1) ENV load (local only; on Render variables come from Settings/Env)
 require('dotenv').config();
-
-// 2) ----- ENV SANITY CHECK (NO SECRETS IN LOGS) -----
-const requiredEnv = ['BOT_TOKEN', 'SUPABASE_URL', 'SUPABASE_KEY'];
-const missing = requiredEnv.filter(k => !process.env[k] || String(process.env[k]).trim() === '');
-if (missing.length) {
-  console.error('[env] Missing:', missing.join(', '));
-  console.error('[env] Tip: Service → Settings → Environment: link your Env Group (EverGrace Keys) and Clear build cache & Deploy.');
-  process.exit(1); // stop here so logs are clear
-}
-console.log('[env] Present:', requiredEnv.map(k => `${k}(ok)`).join(', '));
-
-// 3) ----- Imports -----
 const http = require('http');
 const { Telegraf, Markup } = require('telegraf');
 const { createClient } = require('@supabase/supabase-js');
 
-// 4) ----- Clients -----
-const bot = new Telegraf(process.env.BOT_TOKEN);
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+// ==== ENV ====
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_KEY;
 
-// 5) ----- Healthcheck server (Render) -----
+if (!BOT_TOKEN)  console.error('[env] Missing BOT_TOKEN');
+if (!SUPABASE_URL) console.error('[env] Missing SUPABASE_URL');
+if (!SUPABASE_KEY) console.error('[env] Missing SUPABASE_SERVICE_ROLE or SUPABASE_KEY');
+
+// ==== Clients ====
+const bot = new Telegraf(BOT_TOKEN);
+const sb  = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ==== Healthcheck (Render) ====
 const PORT = process.env.PORT || 10000;
-http
-  .createServer((_, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('OK');
-  })
-  .listen(PORT, () => console.log(`[hc] listening on :${PORT}`));
+http.createServer((_, res) => { res.writeHead(200); res.end('ok'); }).listen(PORT, () => {
+  console.log(`[hc] listening on :${PORT}`);
+});
 
-// 6) ----- Menu (compact)
-function homeKeyboard() {
-  return Markup.keyboard([
-    ['🧭 Menu', '📓 Journal'],
-    ['🧑‍🏫 Coach', '📈 Progress'],
-    ['🆘 SOS', '🔗 Invite'],
-  ]).resize();
+// ==== UI ====
+const mainKeyboard = () => Markup.keyboard([
+  [ '🧭 Menu', '📓 Journal' ],
+  [ '👩‍🏫 Coach', '📈 Progress' ],
+  [ '🆘 SOS', '🔗 Invite' ]
+]).resize();
+
+const sendMenu = (ctx) => {
+  return ctx.reply(' ', mainKeyboard()); // niente testo “Here’s your menu”
+};
+
+// ==== Supabase helpers ====
+async function saveJournal(chatId, text) {
+  const payload = { chat_id: chatId, text };
+  const { data, error } = await sb.from('journal').insert([payload]).select();
+  if (error) {
+    console.error('[journal.insert] error:', error);
+    return { ok: false, error };
+  }
+  return { ok: true, data };
 }
 
-// 7) ----- Basic handlers
-bot.start(async (ctx) => {
-  await ctx.reply('Ciao! Sono EverGrace. Tocca un pulsante per iniziare.', homeKeyboard());
-});
-
-bot.hears(/^(menu|🧭 Menu)$/i, async (ctx) => {
-  // Mostra solo la tastiera, senza messaggi extra
-  await ctx.reply(' ', homeKeyboard()); // space avoids “empty message” but keeps chat clean
-});
-
-bot.hears(/^(📓 Journal)$/i, async (ctx) => {
-  await ctx.reply('Scrivi il tuo pensiero: inizierò a salvare le note.');
-});
-
-bot.hears(/^(🧑‍🏫 Coach)$/i, async (ctx) => {
-  await ctx.reply('Scegli il tipo di coach:\n• Amico\n• Guida spirituale\n• Coach & Goal\n(Presto aggiungeremo profili e streaks!)');
-});
-
-bot.hears(/^(📈 Progress)$/i, async (ctx) => {
-  await ctx.reply('Stiamo preparando streaks, streak freeze e tracciamento progressi. Coming soon!');
-});
-
-bot.hears(/^(🆘 SOS)$/i, async (ctx) => {
-  await ctx.reply('Dimmi cosa sta succedendo. Ti ascolto. (Premi “Back” per tornare al menu)');
-});
-
-bot.hears(/^(🔗 Invite)$/i, async (ctx) => {
-  const username = ctx.botInfo?.username || 'EverGraceRabeBot';
-  const link = `https://t.me/${username}`;
-  await ctx.reply(`Invita un amico: ${link}`);
-});
-
-// 8) ----- Example: store a quick journal entry (very basic)
-bot.on('text', async (ctx, next) => {
-  const text = (ctx.message?.text || '').trim();
-  // ignore commands/buttons we already handle
-  const known = ['🧭 Menu','📓 Journal','🧑‍🏫 Coach','📈 Progress','🆘 SOS','🔗 Invite'];
-  if (!text || known.includes(text) || text.startsWith('/')) return next();
-
-  // Save a tiny journal row (demo) keyed by chat id
-  try {
-    const { error } = await supabase
-      .from('journal')
-      .insert([{ chat_id: ctx.chat.id, text, ts: new Date().toISOString() }]);
-    if (error) {
-      console.error('[sb] insert error', error);
-      await ctx.reply('Ops, non sono riuscita a salvare. Riprova più tardi.');
-      return;
-    }
-    await ctx.reply('Annotato. Vuoi aggiungere altro?', homeKeyboard());
-  } catch (e) {
-    console.error('[journal] unhandled', e);
-    await ctx.reply('Errore inatteso. Riprova più tardi.');
+async function latestJournal(chatId, limit = 5) {
+  const { data, error } = await sb
+    .from('journal')
+    .select('*')
+    .eq('chat_id', chatId)
+    .order('ts', { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.error('[journal.select] error:', error);
+    return { ok: false, error };
   }
+  return { ok: true, data };
+}
+
+// ==== Commands / Buttons ====
+bot.start(async (ctx) => {
+  await ctx.reply('Ooolà! Come va? Sono qui per te. Tocca un pulsante o scrivimi liberamente.', mainKeyboard());
 });
 
-// 9) ----- Launch
-bot.launch()
-  .then(() => console.log('EverGrace bot started'))
-  .catch(err => {
-    console.error('Bot launch failed:', err);
-    process.exit(1);
-  });
+bot.command('menu', sendMenu);
+bot.hears('🧭 Menu', sendMenu);
 
-// 10) ----- Graceful shutdown
+bot.hears('📓 Journal', async (ctx) => {
+  await ctx.reply('Scrivi quello che vuoi annotare. Te lo salvo nel diario.');
+});
+
+bot.hears('👩‍🏫 Coach', async (ctx) => {
+  await ctx.reply('Che tipo di supporto vuoi oggi?\n• Amico\n• Guida spirituale\n• Coach & Goal');
+});
+
+bot.hears('📈 Progress', async (ctx) => {
+  const res = await latestJournal(ctx.chat.id, 3);
+  if (!res.ok) return ctx.reply('Non riesco a leggere ora i progressi. Riprova più tardi.');
+  if (!res.data?.length) return ctx.reply('Ancora nessuna nota. Inizia dal Journal 💬');
+  const lines = res.data.map(r => `• ${new Date(r.ts).toLocaleString()} — ${r.text.slice(0,80)}`);
+  await ctx.reply(`Ultime note:\n${lines.join('\n')}`);
+});
+
+bot.hears('🆘 SOS', async (ctx) => {
+  await ctx.reply('Dimmi cosa succede. Ti ascolto. Se vuoi posso suggerirti un piccolo esercizio di calma. 🙏');
+});
+
+bot.hears('🔗 Invite', async (ctx) => {
+  const username = (await bot.telegram.getMe()).username;
+  await ctx.reply(`Invita chi vuoi: https://t.me/${username}?start=hi`);
+});
+
+// ==== Free text → save to journal ====
+bot.on('text', async (ctx) => {
+  const msg = (ctx.message?.text || '').trim();
+
+  // Evita di rispondere al puro “Menu” ecc. (sono già gestiti sopra)
+  const reserved = ['🧭 Menu','📓 Journal','👩‍🏫 Coach','📈 Progress','🆘 SOS','🔗 Invite'];
+  if (reserved.includes(msg)) return;
+
+  const res = await saveJournal(ctx.chat.id, msg);
+  if (!res.ok) {
+    await ctx.reply('Ops, non sono riuscita a salvare. Riprova più tardi.');
+    return;
+  }
+  await ctx.reply('Annotato. Vuoi aggiungere altro?');
+});
+
+// ==== Errors & Launch ====
+bot.catch((err, ctx) => {
+  console.error('[bot.catch]', err);
+  try { ctx.reply('Oops—qualcosa è andato storto. Riprova più tardi.'); } catch {}
+});
+
+bot.launch().then(() => {
+  console.log('Boot OK · EverGrace is live.');
+});
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
