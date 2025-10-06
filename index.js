@@ -1,372 +1,309 @@
-// EverGrace — CommonJS build (IT/EN/DE)
-// ─────────────────────────────────────────────────────────────────────────────
+// index.js — EverGrace (CommonJS)
+
+// ---------- env & guards ----------
 require('dotenv').config();
-const http = require('http');
-const fs = require('fs');
-const path = require('path');
-const { Telegraf, Markup } = require('telegraf');
-const { createClient } = require('@supabase/supabase-js');
-
-// ── ENV ──────────────────────────────────────────────────────────────────────
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_KEY;
-
-if (!BOT_TOKEN)      console.error('[env] Missing BOT_TOKEN');
-if (!SUPABASE_URL)   console.error('[env] Missing SUPABASE_URL');
-if (!SUPABASE_KEY)   console.error('[env] Missing SUPABASE_SERVICE_ROLE or SUPABASE_KEY');
-
-const bot = new Telegraf(BOT_TOKEN);
-const sb  = createClient(SUPABASE_URL, SUPABASE_KEY);
-
-// ── Healthcheck (Render) ─────────────────────────────────────────────────────
-const PORT = process.env.PORT || 10000;
-http.createServer((_, res) => { res.writeHead(200); res.end('ok'); })
-    .listen(PORT, () => console.log(`[hc] listening on :${PORT}`));
-
-// ── Locales & Tone Engine (IT/EN/DE) ─────────────────────────────────────────
-function loadLocales() {
-  if (!global.__EG_LOCALE) {
-    try {
-      global.__EG_LOCALE = {
-        it: require('./locales/it.json'),
-        en: require('./locales/en.json'),
-        de: require('./locales/de.json'),
-      };
-    } catch (e) {
-      console.error('[i18n] error loading locales', e);
-      global.__EG_LOCALE = { it:{}, en:{}, de:{} };
-    }
-  }
-  return global.__EG_LOCALE;
-}
-const LOCALE = (lang, key, vars = {}) => {
-  const dicts = loadLocales();
-  const dict  = dicts[lang] || dicts.it || {};
-  let out = key.split('.').reduce((o,k)=> (o && o[k]) || null, dict) || key;
-  for (const [k,v] of Object.entries(vars)) out = out.replaceAll(`{${k}}`, String(v));
-  return out;
+const MUST = (name) => {
+  const v = process.env[name];
+  if (!v || !String(v).trim()) throw new Error(`[env] Missing ${name}`);
+  return v.trim();
 };
+const BOT_TOKEN       = MUST('BOT_TOKEN');
+const SUPABASE_URL    = MUST('SUPABASE_URL');
+const SUPABASE_KEY    = MUST('SUPABASE_KEY');
+const OPENAI_API_KEY  = process.env.OPENAI_API_KEY || '';
 
-// lingua/coach fallback in memoria se DB assente
-const memCoach = new Map(); // chatId -> 'friend'|'spiritual'|'goal'
-const memLang  = new Map(); // chatId -> 'it'|'en'|'de'
+// ---------- deps ----------
+const { Telegraf } = require('telegraf');
+const { createClient } = require('@supabase/supabase-js');
+const http = require('http');
 
-// preferenza lingua
-async function getUserLanguage(ctx) {
-  const chatId = ctx.chat.id;
-  // 1) DB -> users.language
+// lazy import for pdfkit to keep footprint small
+async function getPDFKit() {
   try {
-    const { data, error } = await sb.from('users')
-      .select('language')
-      .eq('telegram_id', chatId)
-      .maybeSingle();
-    if (error) throw error;
-    if (data?.language) {
-      memLang.set(chatId, data.language);
-      return data.language;
-    }
-  } catch(_) { /* fallback below */ }
-
-  // 2) in memoria?
-  if (memLang.has(chatId)) return memLang.get(chatId);
-
-  // 3) dal profilo Telegram
-  const code = (ctx.from?.language_code || '').slice(0,2).toLowerCase();
-  const mapped = ['it','en','de'].includes(code) ? code : 'it';
-  memLang.set(chatId, mapped);
-  return mapped;
-}
-async function setUserLanguage(chatId, lang) {
-  memLang.set(chatId, lang);
-  try {
-    await sb.from('users')
-      .upsert({ telegram_id: chatId, language: lang }, { onConflict: 'telegram_id' });
-  } catch(_) { /* ok fallback */ }
-}
-
-async function getCoachMode(chatId) {
-  try {
-    const { data, error } = await sb.from('users')
-      .select('coach_mode')
-      .eq('telegram_id', chatId)
-      .maybeSingle();
-    if (error) throw error;
-    const m = data?.coach_mode || memCoach.get(chatId) || 'friend';
-    return m;
-  } catch(_) {
-    return memCoach.get(chatId) || 'friend';
+    // pdfkit 0.13+ supports CJS require
+    return require('pdfkit');
+  } catch {
+    return null;
   }
 }
-async function setCoachMode(chatId, mode) {
-  memCoach.set(chatId, mode);
-  try {
-    await sb.from('users')
-      .upsert({ telegram_id: chatId, coach_mode: mode }, { onConflict: 'telegram_id' });
-  } catch(_) { /* ok fallback */ }
+
+// ---------- clients ----------
+const bot = new Telegraf(BOT_TOKEN);
+const sb  = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false } });
+
+// minimal openai client (CJS)
+let openai = null;
+if (OPENAI_API_KEY) {
+  const OpenAI = require('openai');
+  openai = new OpenAI({ apiKey: OPENAI_API_KEY });
 }
 
-async function speak(ctx, key, vars = {}) {
-  const chatId = ctx.chat.id;
-  const lang = await getUserLanguage(ctx);
-  const mode = await getCoachMode(chatId);
-  const styled = LOCALE(lang, `modes.${mode}.${key}`, vars);
-  if (styled && styled !== `modes.${mode}.${key}`) return styled;
-  return LOCALE(lang, `common.${key}`, vars);
-}
-
-// ── Menu “colorato” per coach mode ───────────────────────────────────────────
-function menuLabels(mode='friend', lang='it') {
-  // testi base
-  const base = {
-    it: { menu:'Menu', journal:'Journal', coach:'Coach', progress:'Progress', sos:'SOS', invite:'Invita' },
-    en: { menu:'Menu', journal:'Journal', coach:'Coach', progress:'Progress', sos:'SOS', invite:'Invite' },
-    de: { menu:'Menü', journal:'Journal', coach:'Coach', progress:'Fortschritt', sos:'SOS', invite:'Einladen' },
-  }[lang] || { menu:'Menu', journal:'Journal', coach:'Coach', progress:'Progress', sos:'SOS', invite:'Invite' };
-
-  const toneMap = {
-    friend:    { menu:'🧭', journal:'📓', coach:'🧑‍🏫', progress:'📈', sos:'🆘', invite:'🔗' },
-    spiritual: { menu:'🕊️', journal:'🕯️', coach:'🙏',   progress:'🌿', sos:'🫶', invite:'🔗' },
-    goal:      { menu:'🎯', journal:'📒', coach:'📌',   progress:'📊', sos:'⚡', invite:'🔗' },
-  }[mode] || { menu:'🧭', journal:'📓', coach:'🧑‍🏫', progress:'📈', sos:'🆘', invite:'🔗' };
-
+// ---------- helpers ----------
+function menuKeyboard() {
   return {
-    home:     `${toneMap.menu} ${base.menu}`,
-    journal:  `${toneMap.journal} ${base.journal}`,
-    coach:    `${toneMap.coach} ${base.coach}`,
-    progress: `${toneMap.progress} ${base.progress}`,
-    sos:      `${toneMap.sos} ${base.sos}`,
-    invite:   `${toneMap.invite} ${base.invite}`,
+    keyboard: [
+      [{ text: '📒 Journal' }, { text: '📊 Progress' }],
+      [{ text: '🧑‍🏫 Coach'   }, { text: '⚡ SOS'     }],
+      [{ text: '🔗 Invite'   }, { text: '🎯 Menu'    }],
+    ],
+    is_persistent: true,
+    resize_keyboard: true,
   };
 }
+
 async function showMenu(ctx) {
-  const lang = await getUserLanguage(ctx);
-  const mode = await getCoachMode(ctx.chat.id);
-  const L = menuLabels(mode, lang);
-  const kb = Markup.keyboard([
-    [L.journal, L.progress],
-    [L.coach,   L.sos     ],
-    [L.invite,  L.home    ],
-  ]).resize();
-  await ctx.reply('\u2063', kb); // messaggio invisibile
+  // zero-width no-break space → shows keyboard without a visible message
+  await ctx.reply('\uFEFF', { reply_markup: menuKeyboard() });
 }
 
-// ── Journal & Streaks ────────────────────────────────────────────────────────
-const expectingJournal = new Set();
-
-async function saveJournal(chatId, text) {
-  const { error } = await sb.from('journal').insert({ chat_id: chatId, text });
-  if (error) throw error;
-}
-async function hasCheckInToday(chatId) {
-  const start = new Date(); start.setHours(0,0,0,0);
-  const end   = new Date(); end.setHours(23,59,59,999);
-  const { data, error } = await sb.from('journal')
-    .select('id')
-    .eq('chat_id', chatId)
-    .gte('ts', start.toISOString())
-    .lte('ts', end.toISOString());
-  if (error) return false;
-  return (data || []).length > 0;
-}
-async function computeStreak(chatId) {
-  const { data, error } = await sb.from('journal')
-    .select('ts')
-    .eq('chat_id', chatId)
-    .order('ts', { ascending:false });
-  if (error || !data) return 0;
-  const days = new Set(data.map(r => new Date(r.ts).toISOString().slice(0,10)));
-  let streak = 0;
-  for (let d = new Date(); ; d.setDate(d.getDate()-1)) {
-    const key = d.toISOString().slice(0,10);
-    if (days.has(key)) streak++;
-    else break;
-  }
-  return streak;
-}
-async function doCheckIn(chatId) {
-  if (await hasCheckInToday(chatId)) {
-    const st = await computeStreak(chatId);
-    return { msg: `Hai già fatto check-in oggi. Streak attuale: ${st} 🔥` };
-  }
-  await saveJournal(chatId, '#checkin');
-  const st = await computeStreak(chatId);
-  return { msg: `Check-in registrato. Streak: ${st} 🔥` };
+function langOf(ctx) {
+  const code = ctx.from?.language_code || 'it';
+  if (code.startsWith('en')) return 'en';
+  if (code.startsWith('de')) return 'de';
+  if (code.startsWith('it')) return 'it';
+  return 'en';
 }
 
-// ── PDF Export ───────────────────────────────────────────────────────────────
-async function exportPDF(ctx) {
-  let PDFDocument;
-  try { PDFDocument = require('pdfkit'); }
-  catch {
-    await ctx.reply('Per esportare in PDF installa prima: `npm i pdfkit`', { parse_mode:'Markdown' });
+function nowTs() { return new Date().toISOString(); }
+
+// in-memory dedupe for “Esporta PDF” button per chat/message
+const sentButtons = new Set();
+async function offerPdfOnce(ctx) {
+  const key = `pdfbtn:${ctx.chat.id}:${ctx.message?.message_id || Date.now()}`;
+  if (sentButtons.has(key)) return;
+  sentButtons.add(key);
+  setTimeout(() => sentButtons.delete(key), 60_000); // TTL 1 min
+  await ctx.reply(' ', {
+    reply_markup: {
+      inline_keyboard: [[{ text: '📄 Esporta PDF', callback_data: 'journal_export_pdf' }]],
+    },
+  });
+}
+
+async function appendJournal(chat_id, text) {
+  return sb.from('journal').insert({ chat_id, text }).select().single();
+}
+
+async function recentJournal(chat_id, limit = 6) {
+  const { data } = await sb
+    .from('journal')
+    .select('id, text, ts')
+    .eq('chat_id', chat_id)
+    .order('id', { ascending: false })
+    .limit(limit);
+  return data || [];
+}
+
+async function exportJournalPDF(ctx) {
+  const PDFDocument = await getPDFKit();
+  if (!PDFDocument) {
+    await ctx.reply('Per esportare in PDF installa prima: `npm i pdfkit` e riprova.', { parse_mode: 'Markdown' });
     return;
   }
 
-  const { data, error } = await sb.from('journal')
-    .select('id,text,ts')
-    .eq('chat_id', ctx.chat.id)
-    .order('id', { ascending:true });
+  const fs = require('fs');
+  const path = require('path');
 
-  if (error) { console.error('[pdf] select', error); return ctx.reply('Errore durante l’esportazione.'); }
-  if (!data || !data.length) return ctx.reply('Nulla da esportare.');
+  const list = await recentJournal(ctx.chat.id, 200);
+  if (!list.length) {
+    await ctx.reply('Nulla da esportare.');
+    return;
+  }
 
-  const tmpDir = process.env.RENDER ? '/tmp' : path.join(__dirname, 'exports');
-  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive:true });
-  const file = path.join(tmpDir, `journal_${ctx.chat.id}_${Date.now()}.pdf`);
+  const exportsDir = path.join(__dirname, 'exports');
+  if (!fs.existsSync(exportsDir)) fs.mkdirSync(exportsDir, { recursive: true });
+  const file = path.join(exportsDir, `journal_${ctx.chat.id}_${Date.now()}.pdf`);
 
   const doc = new PDFDocument({ margin: 40 });
   const stream = fs.createWriteStream(file);
   doc.pipe(stream);
 
-  doc.fontSize(18).text('Journal — EverGrace', { underline:true });
+  doc.fontSize(18).text('Journal — EverGrace', { underline: true });
   doc.moveDown(1);
 
-  for (const e of data) {
-    const when = new Date(e.ts).toLocaleString('it-IT');
-    doc.fontSize(12).text(`#${e.id} — ${when}`);
+  // print newest first
+  for (const e of [...list].reverse()) {
+    const when = new Date(e.ts).toLocaleString();
+    doc.fontSize(12).text(`#${e.id} • ${when}`);
     doc.moveDown(0.25);
-    doc.fontSize(12).text(e.text || '', { align:'left' });
+    doc.fontSize(12).text(e.text || '', { align: 'left' });
     doc.moveDown(0.75);
   }
 
   doc.end();
   await new Promise(r => stream.on('finish', r));
-  await ctx.replyWithDocument({ source:file, filename:path.basename(file) });
+  await ctx.replyWithDocument({ source: file, filename: require('path').basename(file) });
 }
 
-// ── Handlers ────────────────────────────────────────────────────────────────
+// ---------- AI fallback (short, warm replies) ----------
+function sysPrompt(lang) {
+  if (lang === 'it') return `Sei "EverGrace", un coach gentile, pratico e incoraggiante.
+- Rispondi in 1–3 frasi.
+- Se l’utente è bloccato, suggerisci un micro-passo concreto.
+- Evita ripetizioni.
+- Se opportuno, aggiungi una breve incoraggiamento spirituale neutro.`;
+  if (lang === 'de') return `Du bist „EverGrace“, ein warmherziger, praktischer Coach.
+- Antworte in 1–3 Sätzen.
+- Falls der Nutzer feststeckt, schlage einen winzigen nächsten Schritt vor.
+- Vermeide Wiederholungen.
+- Optional: kurze, neutrale spirituelle Ermutigung.`;
+  return `You are "EverGrace", a warm, practical coach.
+- Reply in 1–3 sentences.
+- If the user seems stuck, propose one tiny next step.
+- Avoid repetitive phrasing.
+- Optionally add a short neutral spiritual encouragement.`;
+}
+
+function summarize(list, n = 6) {
+  return list.slice(-n).map(e => `• ${new Date(e.ts).toLocaleString()}: ${e.text}`).join('\n');
+}
+
+async function aiReply(chat_id, text, lang) {
+  if (!openai) return null;
+  const mem = await recentJournal(chat_id, 6);
+  const memory = summarize(mem, 6) || '(no notes yet)';
+  const res = await openai.chat.completions.create({
+    model: 'gpt-4o-mini',
+    temperature: 0.7,
+    messages: [
+      { role: 'system', content: sysPrompt(lang) },
+      { role: 'user', content: `Recent notes:\n${memory}\n\nUser: ${text}` },
+    ],
+  });
+  return res.choices?.[0]?.message?.content?.trim() || null;
+}
+
+// ---------- commands ----------
 bot.start(async (ctx) => {
+  const l = langOf(ctx);
+  const hello = (l === 'it')
+    ? 'Ooilà! Come va? Tocca i pulsanti qui sotto per iniziare.'
+    : (l === 'de')
+      ? 'Hey! Wie geht’s? Nutze die Tasten unten, um zu starten.'
+      : 'Hey! How are you? Use the buttons below to begin.';
   await showMenu(ctx);
-  const hello = await speak(ctx, 'sos_open'); // benvenuto morbido
-  await ctx.reply(hello);
+  await ctx.reply(hello, { reply_markup: menuKeyboard() });
 });
 
-// Menu
-bot.command('menu', showMenu);
-bot.hears(/Menu|Menü/i, showMenu);
+bot.hears(['🎯 Menu', '/menu', 'Menu', 'menu'], async (ctx) => showMenu(ctx));
 
-// Lingua rapida (facoltativo): /lang it|en|de
-bot.command('lang', async (ctx) => {
-  const parts = (ctx.message.text || '').trim().split(/\s+/);
-  const pick = (parts[1] || '').toLowerCase();
-  if (!['it','en','de'].includes(pick)) {
-    return ctx.reply('Usa: /lang it | en | de');
-  }
-  await setUserLanguage(ctx.chat.id, pick);
-  await ctx.reply(`Lingua impostata: ${pick.toUpperCase()}`);
-  await showMenu(ctx);
+bot.command('version', async (ctx) => {
+  const v = `EverGrace v-${new Date().toISOString().slice(0,10)}-Stable`;
+  await ctx.reply(v, { reply_markup: menuKeyboard() });
 });
 
-// Coach picker
-bot.hears(/Coach|Guida|🙏|📌/i, async (ctx) => {
-  const curr = await getCoachMode(ctx.chat.id);
-  await ctx.reply(
-    `Stile attuale: *${curr}* — quale preferisci?`,
-    {
-      parse_mode:'Markdown',
-      ...Markup.inlineKeyboard([
-        [Markup.button.callback('🧑‍🤝‍🧑 Amico', 'mode_friend')],
-        [Markup.button.callback('🕯️ Spirituale', 'mode_spiritual')],
-        [Markup.button.callback('🎯 Goal', 'mode_goal')],
-      ])
-    }
-  );
-});
-bot.action(/mode_(friend|spiritual|goal)/, async (ctx) => {
-  const m = ctx.match[1];
-  await setCoachMode(ctx.chat.id, m);
-  await ctx.answerCbQuery('Aggiornato');
-  await ctx.editMessageText(`Fatto. Nuovo stile: *${m}*`, { parse_mode:'Markdown' });
-  await showMenu(ctx);
+// ---------- journal ----------
+bot.hears(['📒 Journal', 'Journal', '/journal'], async (ctx) => {
+  const l = langOf(ctx);
+  const prompt = (l === 'it')
+    ? 'Raccontami: cosa hai in mente oggi? ✍️'
+    : (l === 'de')
+      ? 'Erzähl mir: Was geht dir heute durch den Kopf? ✍️'
+      : 'Tell me: what’s on your mind today? ✍️';
+  await ctx.reply(prompt, { reply_markup: menuKeyboard() });
 });
 
-// Journal
-bot.hears(/📓|📒|Journal/i, async (ctx) => {
-  expectingJournal.add(ctx.chat.id);
-  const msg = await speak(ctx, 'journal_prompt');
-  await ctx.reply(
-    msg,
-    Markup.inlineKeyboard([[ Markup.button.callback('📄 Esporta PDF', 'journal_pdf') ]])
-  );
-});
-bot.action('journal_pdf', async (ctx) => {
-  await ctx.answerCbQuery('Esporto PDF…');
-  await exportPDF(ctx);
-});
 bot.on('text', async (ctx, next) => {
-  if (!expectingJournal.has(ctx.chat.id)) return next();
-  const txt = (ctx.message.text || '').trim();
-  if (!txt) return;
+  const text = (ctx.message?.text || '').trim();
+  // if this was a button label, skip to its handler
+  const labels = ['📒 Journal','📊 Progress','🧑‍🏫 Coach','⚡ SOS','🔗 Invite','🎯 Menu'];
+  if (labels.includes(text)) return next();
+
+  // treat as a journal note by default
+  const { error } = await appendJournal(ctx.chat.id, text);
+  if (!error) {
+    const l = langOf(ctx);
+    const ok = (l === 'it') ? 'Annotato. ✅' : (l === 'de') ? 'Notiert. ✅' : 'Saved. ✅';
+    await ctx.reply(ok, { reply_markup: menuKeyboard() });
+    await offerPdfOnce(ctx);
+    return;
+  }
+
+  // If insert failed for some reason, try AI fallback as a chat
+  const reply = await aiReply(ctx.chat.id, text, langOf(ctx));
+  if (reply) {
+    await ctx.reply(reply, { reply_markup: menuKeyboard() });
+    return;
+  }
+
+  await ctx.reply('Ops, non riesco a salvare ora. Riprova più tardi.', { reply_markup: menuKeyboard() });
+});
+
+// PDF export button
+bot.action('journal_export_pdf', async (ctx) => {
   try {
-    await saveJournal(ctx.chat.id, txt);
-    const saved = await speak(ctx, 'journal_saved');
-    await ctx.reply(saved);
+    await ctx.answerCbQuery('Esporto in PDF…');
+    await exportJournalPDF(ctx);
   } catch (e) {
-    console.error('[journal] save error', e);
-    await ctx.reply('Ops, non sono riuscita a salvare. Riprova più tardi.');
+    await ctx.answerCbQuery('Errore durante esportazione.');
   }
 });
 
-// Progress / Streak
-bot.hears(/📈|📊|Progress|Fortschritt|Cammino/i, async (ctx) => {
-  const st = await computeStreak(ctx.chat.id);
-  const kb = Markup.inlineKeyboard([
-    [Markup.button.callback('✅ Check-in', 'streak_checkin')],
-    [Markup.button.callback('ℹ️ Dettagli', 'streak_info')],
-  ]);
-  await ctx.reply(`Streak attuale: ${st} 🔥`, kb);
-});
-bot.action('streak_checkin', async (ctx) => {
-  const out = await doCheckIn(ctx.chat.id);
-  const msg = await speak(ctx, 'streak_after_checkin', { text: out.msg });
-  await ctx.answerCbQuery('Fatto!');
-  await ctx.editMessageText(msg);
-});
-bot.action('streak_info', async (ctx) => {
-  const st = await computeStreak(ctx.chat.id);
-  const info = `Giorni consecutivi con attività nel diario: ${st}.`;
-  const msg = await speak(ctx, 'streak_info_wrap', { text: info });
-  await ctx.answerCbQuery();
-  await ctx.editMessageText(msg);
+// ---------- progress (log & stop the loop) ----------
+async function logProgress(ctx, payload = {}) {
+  // Example: write one row into journal as a progress marker
+  await appendJournal(ctx.chat.id, payload.text || 'Progress update');
+  const l = langOf(ctx);
+  const msg = (l === 'it') ? 'Fatto! 💪' : (l === 'de') ? 'Erledigt! 💪' : 'Done! 💪';
+  await ctx.reply(msg, { reply_markup: menuKeyboard() });
+}
+
+bot.hears(['📊 Progress','Progress','/progress'], async (ctx) => {
+  const l = langOf(ctx);
+  const q = (l === 'it') ? 'Qual è il tuo micro-passo di oggi?' :
+            (l === 'de') ? 'Was ist dein heutiger Mini-Schritt?' :
+                           'What’s your tiny step for today?';
+  await ctx.reply(q, { reply_markup: menuKeyboard() });
 });
 
-// SOS
-bot.hears(/🆘|SOS|⚡/i, async (ctx) => {
-  const msg = await speak(ctx, 'sos_open');
-  await ctx.reply(
-    msg,
-    Markup.inlineKeyboard([
-      [Markup.button.callback('Parlane con me', 'sos_talk')],
-      [Markup.button.callback('Tecniche rapide', 'sos_tools')],
-    ])
-  );
-});
-bot.action('sos_talk', async (ctx) => {
-  await ctx.answerCbQuery();
-  const msg = await speak(ctx, 'sos_talk_start');
-  await ctx.editMessageText(msg);
-});
-bot.action('sos_tools', async (ctx) => {
-  await ctx.answerCbQuery();
-  const msg = await speak(ctx, 'sos_tools_intro');
-  await ctx.editMessageText(msg);
+// If user answers with something like “done: …” treat as progress quickly
+bot.hears(/^done[:\-]\s*/i, async (ctx) => {
+  const text = ctx.message.text.replace(/^done[:\-]\s*/i,'').trim();
+  await logProgress(ctx, { text: `✅ ${text}` });
 });
 
-// Invite
-bot.hears(/Invite|Invita|Einladen|🔗/i, async (ctx) => {
-  const me = await bot.telegram.getMe();
-  const link = `https://t.me/${me.username}?start=${ctx.chat.id}`;
-  await ctx.reply(`Condividi EverGrace: ${link}`);
+// ---------- coach / sos / invite ----------
+bot.hears(['🧑‍🏫 Coach','Coach','/coach'], async (ctx) => {
+  const l = langOf(ctx);
+  const msg = (l === 'it')
+    ? 'Coach attivo. Dimmi l’obiettivo o chiedimi un micro-passo.'
+    : (l === 'de')
+      ? 'Coach aktiv. Nenne mir dein Ziel oder frag nach einem Mini-Schritt.'
+      : 'Coach on. Tell me your goal or ask for a tiny next step.';
+  await ctx.reply(msg, { reply_markup: menuKeyboard() });
 });
 
-// Fallback error
-bot.catch((err, ctx) => {
-  console.error('[bot] error', err);
-  try { ctx.reply('Oops—qualcosa è andato storto. Riprova.'); } catch {}
+bot.hears(['⚡ SOS','SOS','/sos'], async (ctx) => {
+  const l = langOf(ctx);
+  const msg = (l === 'it')
+    ? 'Respira. 3 cose che puoi controllare adesso? Scrivile qui sotto.'
+    : (l === 'de')
+      ? 'Atme. Nenne 3 Dinge, die du jetzt kontrollieren kannst. Schreib sie hier.'
+      : 'Breathe. Name 3 things you can control right now. Type them here.';
+  await ctx.reply(msg, { reply_markup: menuKeyboard() });
 });
 
-// Launch
-bot.launch().then(() => console.log('Boot OK · EverGrace live (IT/EN/DE)'));
+bot.hears(['🔗 Invite','Invite','/invite'], async (ctx) => {
+  const link = `https://t.me/${(await bot.telegram.getMe()).username}`;
+  const l = langOf(ctx);
+  const msg = (l === 'it')
+    ? `Invita amici con questo link: ${link}`
+    : (l === 'de')
+      ? `Lade Freunde mit diesem Link ein: ${link}`
+      : `Invite friends with this link: ${link}`;
+  await ctx.reply(msg, { reply_markup: menuKeyboard() });
+});
+
+// ---------- healthcheck (Render) ----------
+const PORT = process.env.PORT || 10000;
+http.createServer((_req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('ok');
+}).listen(PORT, () => console.log(`[hc] listening on :${PORT}`));
+
+// ---------- launch ----------
+bot.launch().then(() => console.log('Bot OK. @EverGraceRabeBot'));
+
+// graceful stop (Render)
 process.once('SIGINT', () => bot.stop('SIGINT'));
 process.once('SIGTERM', () => bot.stop('SIGTERM'));
