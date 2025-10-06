@@ -1,40 +1,41 @@
 {
-  "brand_hello": "✨🕊️ Welcome to *EverGrace by RABE* ✨\n\nYour gentle guide, your safe space, your daily spark of inspiration.\n\nHere, every word is a seed: together we grow memories, actions, and legacy.",
-  "choose_lang": "🌍 Now choose the language to walk this journey with:",
-  "choose_goal": "What's your focus now?",
-  "goals": ["peace", "discipline", "faith", "family", "other"],
-  "onboard_done": "Beautiful. I’ll keep it in mind. Type /daily or use the menu to begin.",
-  "menu": "Here’s your menu:",
-  "btn_daily": "🌅 Morning",
-  "btn_evening": "🌙 Evening",
-  "btn_sos": "🆘 SOS",
-  "btn_legacy": "📝 Legacy note",
-  "btn_settings": "⚙️ Settings",
-
-  "btn_lang": "🌍 Language",
-  "btn_goal": "🎯 Goal",
-  "btn_chat_on": "🗣️ Chat ON",
-  "btn_chat_off": "🤫 Chat OFF",
-
-  "ask_legacy": "Write a short memory or reflection. I’ll save it for your legacy.",
-  "saved_legacy": "Saved in your legacy. Proud of you!",
-  "sos_hint": "Tell me in one line how you feel, and I’ll respond calmly.",
-  "set_lang": "Language updated.",
-  "pick_lang": "Pick a language:",
-  "pick_goal": "Pick your goal:",
-
-  "chat_enabled": "🟣 Conversation mode is ON. Talk to me freely.",
-  "chat_disabled": "🔇 Conversation mode is OFF. Use the menu or commands.",
-  "chat_ack": "✅ I hear you. This is what I understood:",
-  "chat_followup": "Shall I turn it into a tiny action for today, or would you prefer a /daily suggestion?",
-  "chat_retry": "Sorry, I had a small hiccup. Shall we try again?",
-
-  "emo_stressed": "Stress feels heavy. Ground yourself with your 5 senses: 5 you see, 4 you touch, 3 you hear, 2 you smell, 1 you taste.",
-  "emo_tired": "You seem tired. Try 2 minutes of box-breathing: inhale 4, hold 4, exhale 4, hold 4. Then one kind act for yourself.",
-  "emo_anxious": "Anxiety marks a boundary. Write *one* small thing you can protect, then breathe and answer later.",
-  "emo_sad": "I’m sorry for this moment. Add a touch of kindness. A warm drink and a line in your legacy?",
-  "emo_overwhelm": "You feel overwhelmed. Capture *one* tiny step you can do for 5 minutes now.",
-  "emo_happy": "Love that! Capture the moment. A quick legacy note so this light remains?",
-  "emo_grateful": "Gratitude shines. Who or what are you grateful for today? One phrase in your legacy?",
-  "emo_default": "I’m here. Tell me briefly what matters most right now — I can suggest a micro action or /daily."
+  "common": {
+    "journal_prompt": "Tell me what you want to note today.",
+    "journal_saved": "Saved. Add anything else?",
+    "journal_nudge": "If you want, I can keep it in your journal. Just type.",
+    "sos_open": "Tell me what happened. I’m here with you.",
+    "sos_talk_start": "Alright, let’s talk. What do you feel in your body now?",
+    "sos_tools_intro": "Two quick tools: 4-7-8 breathing; 5-4-3-2-1 grounding.",
+    "streak_after_checkin": "{text}",
+    "streak_info_wrap": "{text}"
+  },
+  "modes": {
+    "friend": {
+      "journal_prompt": "What’s on your mind today? ✍️",
+      "journal_saved": "Done! Want to add more? 😊",
+      "sos_open": "I’m here. What happened?",
+      "sos_talk_start": "I’m listening. Close your eyes—what do you notice first?",
+      "sos_tools_intro": "Let’s try 4-7-8 breathing or the 5-4-3-2-1 senses game.",
+      "streak_after_checkin": "Nice! 💪\n{text}",
+      "streak_info_wrap": "Here you go:\n{text}"
+    },
+    "spiritual": {
+      "journal_prompt": "Take a breath. What does your heart wish to say today? 🕯️",
+      "journal_saved": "Thank you for sharing. Anything else, gently?",
+      "sos_open": "I’ll sit in quiet with you. What needs care right now?",
+      "sos_talk_start": "Listen to the body—what sensation comes first?",
+      "sos_tools_intro": "Two brief practices: mindful 4-7-8 and grounding 5-4-3-2-1.",
+      "streak_after_checkin": "Step by step. 🌿\n{text}",
+      "streak_info_wrap": "The rhythm of your path:\n{text}"
+    },
+    "goal": {
+      "journal_prompt": "Note today’s action and why it matters. 🎯",
+      "journal_saved": "Logged. What’s the next micro-step?",
+      "sos_open": "Let’s frame the problem in one sentence. What’s the obstacle?",
+      "sos_talk_start": "What’s the minimum outcome you want in 24h?",
+      "sos_tools_intro": "Quick tools: 4-7-8 for focus; 5-4-3-2-1 to reset attention.",
+      "streak_after_checkin": "Input recorded. Keep going.\n{text}",
+      "streak_info_wrap": "Personal KPIs:\n{text}"
+    }
+  }
 }
