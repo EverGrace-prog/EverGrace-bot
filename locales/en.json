@@ -1,5 +1,16 @@
 {
+  "welcome": {
+    "hello": "Hi {name} 🌿",
+    "subtitle": "Welcome to EverGrace — a gentle place for journaling, coaching, and tiny steps."
+  },
   "common": {
+    "k_journal": "Journal",
+    "k_progress": "Progress",
+    "k_coach": "Coach",
+    "k_sos": "SOS",
+    "k_invite": "Invite",
+    "k_settings": "Settings",
+    "save_error": "Sorry, I couldn’t save. Please try later.",
     "journal_prompt": "Tell me what you want to note today.",
     "journal_saved": "Saved. Add anything else?",
     "journal_nudge": "If you want, I can keep it in your journal. Just type.",
@@ -11,20 +22,20 @@
   },
   "modes": {
     "friend": {
-      "journal_prompt": "What’s on your mind today? ✍️",
+      "journal_prompt": "What’s on your mind today? 🔥",
       "journal_saved": "Done! Want to add more? 😊",
       "sos_open": "I’m here. What happened?",
       "sos_talk_start": "I’m listening. Close your eyes—what do you notice first?",
-      "sos_tools_intro": "Let’s try 4-7-8 breathing or the 5-4-3-2-1 senses game.",
+      "sos_tools_intro": "Let’s try a simple one: 4-7-8 breathing or the 5-4-3-2-1 senses game.",
       "streak_after_checkin": "Nice! 💪\n{text}",
       "streak_info_wrap": "Here you go:\n{text}"
     },
     "spiritual": {
-      "journal_prompt": "Take a breath. What does your heart wish to say today? 🕯️",
+      "journal_prompt": "Take a breath. What does your heart wish to say today? ✨",
       "journal_saved": "Thank you for sharing. Anything else, gently?",
       "sos_open": "I’ll sit in quiet with you. What needs care right now?",
-      "sos_talk_start": "Listen to the body—what sensation comes first?",
-      "sos_tools_intro": "Two brief practices: mindful 4-7-8 and grounding 5-4-3-2-1.",
+      "sos_talk_start": "Listen to the body—what sensations come first?",
+      "sos_tools_intro": "Two brief practices: mindful 4-7-8 breathing and 5-4-3-2-1 grounding.",
       "streak_after_checkin": "Step by step. 🌿\n{text}",
       "streak_info_wrap": "The rhythm of your path:\n{text}"
     },
@@ -32,10 +43,47 @@
       "journal_prompt": "Note today’s action and why it matters. 🎯",
       "journal_saved": "Logged. What’s the next micro-step?",
       "sos_open": "Let’s frame the problem in one sentence. What’s the obstacle?",
-      "sos_talk_start": "What’s the minimum outcome you want in 24h?",
+      "sos_talk_start": "What’s the minimum outcome you want in the next 24h?",
       "sos_tools_intro": "Quick tools: 4-7-8 for focus; 5-4-3-2-1 to reset attention.",
-      "streak_after_checkin": "Input recorded. Keep going.\n{text}",
+      "streak_after_checkin": "Input received. Keep going. 💫\n{text}",
       "streak_info_wrap": "Personal KPIs:\n{text}"
     }
+  },
+  "settings": {
+    "title": "Settings",
+    "change_lang": "Language",
+    "coach_mode": "Coach mode",
+    "pick_lang": "Choose your language:",
+    "lang_ok": "Language updated. ✨"
+  },
+  "invite": {
+    "text": "Invite someone you care about: {link}"
+  },
+  "coach": {
+    "friend": "Friend",
+    "spiritual": "Spiritual",
+    "goal": "Life & Goals",
+    "pick": "Pick a coaching style:",
+    "set_friend": "Coach set to Friend.",
+    "set_spiritual": "Coach set to Spiritual.",
+    "set_goal": "Coach set to Life & Goals.",
+    "escalate": "That sounds like a coach question — let’s explore it together.",
+    "friend_intro": "I’m here. What do you notice first?",
+    "spiritual_intro": "Breathe. What is present in your body right now?",
+    "goal_intro": "What small outcome do you want in the next 24 hours?",
+    "coach_intro": "Let’s talk. I’m here with you.",
+    "coach_reply_hint": "Close your eyes for a second… what’s the first detail that stands out?"
+  },
+  "sos": {
+    "open": "Tell me—what happened? I’m here with you.",
+    "tools": "Two quick tools: 4-7-8 breathing and the 5-4-3-2-1 grounding."
+  },
+  "journal": {
+    "prompt": "What would you like to note today? ✍️",
+    "saved": "Saved. Want to add more?"
+  },
+  "progress": {
+    "empty": "No notes yet. Start with the Journal ✍️",
+    "latest": "Your recent notes:"
   }
 }

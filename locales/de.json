@@ -1,29 +1,40 @@
 {
+  "welcome": {
+    "hello": "Hallo {name} 🌿",
+    "subtitle": "Willkommen bei EverGrace — ein sanfter Ort für Tagebuch, Coaching und kleine Schritte."
+  },
   "common": {
+    "k_journal": "Journal",
+    "k_progress": "Fortschritt",
+    "k_coach": "Coach",
+    "k_sos": "SOS",
+    "k_invite": "Einladen",
+    "k_settings": "Einstellungen",
+    "save_error": "Sorry, das Speichern ist fehlgeschlagen. Bitte versuche es später erneut.",
     "journal_prompt": "Erzähl mir, was du heute notieren möchtest.",
     "journal_saved": "Gespeichert. Möchtest du noch etwas hinzufügen?",
-    "journal_nudge": "Wenn du magst, bewahre ich es in deinem Tagebuch auf. Schreib einfach.",
+    "journal_nudge": "Wenn du magst, bewahre ich es in deinem Journal auf. Schreib einfach.",
     "sos_open": "Erzähl mir, was passiert ist. Ich bin bei dir.",
-    "sos_talk_start": "Okay, reden wir. Was fühlst du gerade in deinem Körper?",
+    "sos_talk_start": "Okay, reden wir ruhig. Was fühlst du gerade in deinem Körper?",
     "sos_tools_intro": "Zwei schnelle Tools: 4-7-8-Atmung; 5-4-3-2-1-Grounding.",
     "streak_after_checkin": "{text}",
     "streak_info_wrap": "{text}"
   },
   "modes": {
     "friend": {
-      "journal_prompt": "Woran denkst du heute? ✍️",
-      "journal_saved": "Fertig! Möchtest du noch etwas hinzufügen? 😊",
+      "journal_prompt": "Woran denkst du heute? 🔥",
+      "journal_saved": "Fertig! Möchtest du noch mehr hinzufügen? 😊",
       "sos_open": "Ich bin da. Was ist passiert?",
-      "sos_talk_start": "Ich höre zu. Schließe kurz die Augen — was nimmst du zuerst wahr?",
-      "sos_tools_intro": "Probieren wir 4-7-8-Atmung oder das 5-4-3-2-1-Sinnespiel.",
+      "sos_talk_start": "Ich höre zu. Schließe kurz die Augen—was nimmst du zuerst wahr?",
+      "sos_tools_intro": "Probieren wir etwas Einfaches: 4-7-8-Atmung oder das 5-4-3-2-1-Sinnesspiel.",
       "streak_after_checkin": "Super! 💪\n{text}",
       "streak_info_wrap": "Hier ist es:\n{text}"
     },
     "spiritual": {
-      "journal_prompt": "Atme einmal durch. Was möchte dein Herz heute sagen? 🕯️",
-      "journal_saved": "Danke fürs Teilen. Sanft noch etwas hinzufügen?",
+      "journal_prompt": "Atme einmal durch. Was möchte dein Herz heute sagen? ✨",
+      "journal_saved": "Danke fürs Teilen. Noch etwas—ganz behutsam?",
       "sos_open": "Ich sitze still mit dir. Was braucht jetzt Zuwendung?",
-      "sos_talk_start": "Hör in den Körper — welche Empfindung kommt zuerst?",
+      "sos_talk_start": "Hör in den Körper—welche Empfindungen kommen zuerst?",
       "sos_tools_intro": "Zwei kurze Übungen: achtsame 4-7-8-Atmung und 5-4-3-2-1-Grounding.",
       "streak_after_checkin": "Schritt für Schritt. 🌿\n{text}",
       "streak_info_wrap": "Der Rhythmus deines Weges:\n{text}"
@@ -31,11 +42,48 @@
     "goal": {
       "journal_prompt": "Notiere die heutige Aktion und warum sie zählt. 🎯",
       "journal_saved": "Erfasst. Was ist der nächste Mikro-Schritt?",
-      "sos_open": "Lass uns das Problem in einem Satz rahmen. Was ist das Hindernis?",
-      "sos_talk_start": "Welches Minimal-Ergebnis möchtest du in 24 h?",
-      "sos_tools_intro": "Schnelle Tools: 4-7-8 für Fokus; 5-4-3-2-1 zum Reset der Aufmerksamkeit.",
-      "streak_after_checkin": "Erfasst. Weiter so.\n{text}",
-      "streak_info_wrap": "Deine persönlichen KPIs:\n{text}"
+      "sos_open": "Fassen wir das Problem in einem Satz zusammen. Was ist das Hindernis?",
+      "sos_talk_start": "Welches Mindest-Ergebnis möchtest du in den nächsten 24 h?",
+      "sos_tools_intro": "Schnelle Tools: 4-7-8 für Fokus; 5-4-3-2-1 für einen Aufmerksamkeits-Reset.",
+      "streak_after_checkin": "Notiert. Weiter so. 💫\n{text}",
+      "streak_info_wrap": "Persönliche KPIs:\n{text}"
     }
+  },
+  "settings": {
+    "title": "Einstellungen",
+    "change_lang": "Sprache",
+    "coach_mode": "Coach-Modus",
+    "pick_lang": "Wähle deine Sprache:",
+    "lang_ok": "Sprache aktualisiert. ✨"
+  },
+  "invite": {
+    "text": "Lade jemanden ein, der dir wichtig ist: {link}"
+  },
+  "coach": {
+    "friend": "Freund/in",
+    "spiritual": "Spirituell",
+    "goal": "Leben & Ziele",
+    "pick": "Wähle einen Coaching-Stil:",
+    "set_friend": "Coach auf Freund/in gesetzt.",
+    "set_spiritual": "Coach auf Spirituell gesetzt.",
+    "set_goal": "Coach auf Leben & Ziele gesetzt.",
+    "escalate": "Das klingt nach einer Coach-Frage — lass es uns gemeinsam erkunden.",
+    "friend_intro": "Ich bin da. Was nimmst du zuerst wahr?",
+    "spiritual_intro": "Atme. Was ist jetzt im Körper präsent?",
+    "goal_intro": "Welches kleine Ergebnis möchtest du in den nächsten 24 Stunden?",
+    "coach_intro": "Lass uns reden. Ich bin bei dir.",
+    "coach_reply_hint": "Schließe die Augen für einen Moment… welches Detail sticht zuerst hervor?"
+  },
+  "sos": {
+    "open": "Erzähl mir — was ist passiert? Ich bin bei dir.",
+    "tools": "Zwei schnelle Tools: 4-7-8-Atmung und 5-4-3-2-1-Grounding."
+  },
+  "journal": {
+    "prompt": "Was möchtest du heute notieren? ✍️",
+    "saved": "Gespeichert. Noch etwas hinzufügen?"
+  },
+  "progress": {
+    "empty": "Noch keine Notizen. Starte mit dem Journal ✍️",
+    "latest": "Deine neuesten Notizen:"
   }
 }
