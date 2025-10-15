@@ -1,277 +1,200 @@
 // index.js — EverGrace bot (CommonJS)
 
-// 1) ENV load (local only; on Render variables come from Settings/Env)
+/* ---------------- 1) ENV load (local only) ---------------- */
 require('dotenv').config();
 
-// 2) ENV sanity check (NO SECRETS IN LOGS)
-const requiredEnv = ['BOT_TOKEN', 'SUPABASE_URL', 'SUPABASE_KEY'];
-const missing = requiredEnv.filter(k => !process.env[k] || String(process.env[k]).trim() === '');
+/* ---------------- 2) ENV sanity check -------------------- */
+const REQUIRED = ['BOT_TOKEN', 'SUPABASE_URL', 'SUPABASE_KEY'];
+const missing = REQUIRED.filter(k => !process.env[k] || String(process.env[k]).trim() === '');
 if (missing.length) {
   console.error('[env] Missing:', missing.join(', '));
-  console.error('[env] Tip: Service ▸ Settings ▸ Environment: link your Env Group (EverGrace Keys) and Clear build cache & Deploy.');
-  process.exit(1); // stop here so logs are clear
+  console.error('[env] Hint: link your Environment Group and redeploy.');
+  process.exit(1);
 }
-console.log('[env] Present:', requiredEnv.map(k => `${k} (ok)`).join(', '));
+console.log('[env] Present:', REQUIRED.join(', '));
 
-// 3) Imports
+/* ---------------- 3) Imports ------------------------------ */
 const http = require('http');
 const path = require('path');
-const fs = require('fs');
-const PDFDocument = require('pdfkit');
 const { Telegraf, Markup } = require('telegraf');
 const { createClient } = require('@supabase/supabase-js');
+const PDFDocument = require('pdfkit'); // if you export PDFs later
+const fs = require('fs');
 
-// 4) Clients
+/* ---------------- 4) Clients ------------------------------ */
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-// 5) Healthcheck server (Render)
+/* ---------------- 5) Healthcheck (Render) ----------------- */
 const PORT = process.env.PORT || 10000;
 http.createServer((_, res) => {
   res.writeHead(200, { 'Content-Type': 'text/plain' });
   res.end('OK');
 }).listen(PORT, () => console.log(`[hc] listening on ${PORT}`));
 
-// 6) Locales (EN / IT / DE)
-function loadJSON(fp) {
-  try { return JSON.parse(fs.readFileSync(fp, 'utf8')); }
-  catch { return {}; }
-}
-const LOCALES_DIR = path.join(__dirname, 'locales');
-const L = {
-  en: loadJSON(path.join(LOCALES_DIR, 'en.json')),
-  it: loadJSON(path.join(LOCALES_DIR, 'it.json')),
-  de: loadJSON(path.join(LOCALES_DIR, 'de.json')),
+/* ---------------- 6) i18n setup --------------------------- */
+const locales = {
+  en: require('./locales/en.json'),
+  it: require('./locales/it.json'),
+  de: require('./locales/de.json'),
 };
+const SUPPORTED = ['en', 'it', 'de'];
+const BLANK = '\u2063'; // zero-width “invisible” char (Telegram accepts)
 
-// util: deep get "a.b.c"
-const get = (obj, key, dflt='') => key.split('.').reduce((o,k)=> (o && o[k] != null ? o[k] : undefined), obj) ?? dflt;
-
-// choose locale code from Telegram + fallback
-function pickLang(ctx) {
-  const code = (ctx.from?.language_code || '').slice(0,2);
-  if (code === 'it') return 'it';
-  if (code === 'de') return 'de';
-  return 'en';
-}
-function t(lang, key, vars={}) {
-  const s = get(L[lang] || L.en, key, get(L.en, key, key));
-  return s.replace(/\{(\w+)\}/g, (_,k) => vars[k] ?? `{${k}}`);
+/** safely get nested key like "common.welcome" */
+function get(dict, dotted) {
+  return dotted.split('.').reduce((o, k) => (o && o[k] !== undefined ? o[k] : undefined), dict);
 }
 
-// 7) In-memory per-chat state (simple)
-const state = new Map(); // chatId -> { mode, lang, inJournal }
-
-function ensureChat(ctx) {
-  const id = ctx.chat.id;
-  if (!state.has(id)) {
-    state.set(id, { mode: 'goal', lang: pickLang(ctx), inJournal: false });
-  }
-  return state.get(id);
+/** resolve translation with fallbacks; never returns empty string */
+function t(langCode, key, vars = {}) {
+  const lang = SUPPORTED.includes(langCode) ? langCode : 'en';
+  let str = get(locales[lang], key);
+  if (str === undefined) str = get(locales['en'], key);
+  if (str === undefined || String(str).trim() === '') str = `[${key}]`; // visible fallback
+  // simple template replacement
+  return String(str).replace(/\{(\w+)\}/g, (_, k) => (vars[k] ?? `{${k}}`));
 }
 
-// 8) Keyboard (compact)
-function homeKeyboard(ctx) {
-  const s = ensureChat(ctx);
-  const K = (k) => ({
-    Menu: '🎯 Menu', Journal: '📒 Journal', Coach: '📌 Coach',
-    Progress: '📊 Progress', SOS: '⚡️ SOS', Invite: '🔗 Invita'
-  }[k]);
+/** decide user language */
+function userLang(ctx) {
+  const code = ctx?.from?.language_code?.slice(0,2)?.toLowerCase() || 'en';
+  return SUPPORTED.includes(code) ? code : 'en';
+}
+
+/* ---------------- 7) Keyboards ---------------------------- */
+function homeKeyboard(lang='en') {
   return Markup.keyboard([
-    [K('Journal'), K('Progress')],
-    [K('Coach'),   K('SOS')],
-    [K('Invite'),  K('Menu')],
+    ['📒 ' + t(lang,'common.k_journal'), '📊 ' + t(lang,'common.k_progress')],
+    ['📌 ' + t(lang,'common.k_coach'),   '⚡ ' + t(lang,'common.k_sos')],
+    ['🔗 ' + t(lang,'common.k_invite'),  '🎯 ' + t(lang,'common.k_menu')],
   ]).resize();
 }
 
-// 9) Language picker
-const LANG_LABELS = { en: 'English', it: 'Italiano', de: 'Deutsch' };
-function langKeyboard(current) {
-  return Markup.inlineKeyboard([
-    [{ text: (current==='en'?'✅ ':'')+LANG_LABELS.en, callback_data: 'lang:en' }],
-    [{ text: (current==='it'?'✅ ':'')+LANG_LABELS.it, callback_data: 'lang:it' }],
-    [{ text: (current==='de'?'✅ ':'')+LANG_LABELS.de, callback_data: 'lang:de' }],
-  ]);
+function langKeyboard() {
+  return Markup.keyboard([
+    ['🇮🇹 Italiano', '🇬🇧 English'],
+    ['🇩🇪 Deutsch', '🎯 Menu'],
+  ]).resize();
 }
 
-// 10) Helpers: Journal save + PDF export
-async function saveJournal(chat_id, text) {
+/* ---------------- 8) Helpers ------------------------------ */
+async function ensureUser(ctx) {
+  const chat_id = ctx.chat.id;
+  const name = ctx.from.first_name || 'Friend';
+  // upsert user
+  await supabase.from('users').upsert({ chat_id, name }).eq('chat_id', chat_id);
+}
+
+async function saveJournal(ctx, text) {
+  const chat_id = ctx.chat.id;
   const { error } = await supabase.from('journal').insert({ chat_id, text });
-  if (error) throw error;
+  return !error;
 }
 
-async function exportJournalPdf(chat_id, lang='en') {
-  const { data, error } = await supabase
-    .from('journal')
-    .select('id, ts, text')
-    .eq('chat_id', chat_id)
-    .order('ts', { ascending: true });
-
-  if (error) throw error;
-
-  const fname = `journal_${chat_id}_${Date.now()}.pdf`;
-  const fpath = path.join(process.cwd(), fname);
-  const doc = new PDFDocument({ margin: 36 });
-  const out = fs.createWriteStream(fpath);
-  doc.pipe(out);
-
-  doc.fontSize(16).text('EverGrace — Journal', { align: 'center' });
-  doc.moveDown();
-
-  if (!data || data.length === 0) {
-    doc.fontSize(12).text(t(lang,'common.no_entries') || 'No entries yet.');
-  } else {
-    data.forEach(row => {
-      const when = new Date(row.ts || Date.now()).toLocaleString();
-      doc.fontSize(10).fillColor('#555').text(when);
-      doc.fontSize(12).fillColor('#000').text(row.text);
-      doc.moveDown(0.8);
-    });
-  }
-  doc.end();
-  await new Promise(r => out.on('finish', r));
-  return fpath;
+function nonEmpty(s) {
+  return (s && String(s).trim().length) ? String(s) : BLANK;
 }
 
-// 11) Command & button handlers
+/* ---------------- 9) Commands/Handlers -------------------- */
+// /start — greet + menu
 bot.start(async (ctx) => {
-  const s = ensureChat(ctx);
-  const name = (ctx.from?.first_name || '').trim();
-  const hi = name ? (s.lang==='it' ? `Ciao ${name} 🌿` : s.lang==='de' ? `Hallo ${name} 🌿` : `Hi ${name} 🌿`) :
-                    (s.lang==='it' ? 'Ciao 🌿' : s.lang==='de' ? 'Hallo 🌿' : 'Hi 🌿');
-  await ctx.reply(hi);
+  const lang = userLang(ctx);
+  await ensureUser(ctx);
   await ctx.reply(
-    t(s.lang,'common.welcome') || 'Welcome to EverGrace — your gentle space for journaling, coaching and small steps.',
-    homeKeyboard(ctx)
+    t(lang,'common.hello',{ name: ctx.from.first_name || '' }),
+    homeKeyboard(lang)
   );
+  await ctx.reply(t(lang,'common.welcome'), homeKeyboard(lang));
 });
 
-// language
-bot.command('lang', async (ctx) => {
-  const s = ensureChat(ctx);
-  await ctx.reply(t(s.lang,'common.pick_language') || 'Choose your language:', langKeyboard(s.lang));
-});
-bot.action(/^lang:(en|it|de)$/, async (ctx) => {
-  const s = ensureChat(ctx);
-  s.lang = ctx.match[1];
-  await ctx.answerCbQuery('OK');
-  await ctx.editMessageText(t(s.lang,'common.language_set') || 'Language updated.');
+// /refresh — redraw the menu only
+bot.command('refresh', async (ctx) => {
+  const lang = userLang(ctx);
+  await ctx.reply(BLANK, homeKeyboard(lang));
 });
 
-// menu (show keyboard silently)
-bot.hears(/^(🎯 Menu|Menu)$/i, async (ctx) => {
-  await ctx.reply(' ', homeKeyboard(ctx)); // blank keeps chat clean while opening keyboard
+// Language picker
+bot.hears(/^(🇮🇹 Italiano|🇬🇧 English|🇩🇪 Deutsch)$/i, async (ctx) => {
+  let lang = 'en';
+  if (/Italiano/i.test(ctx.message.text)) lang = 'it';
+  else if (/Deutsch/i.test(ctx.message.text)) lang = 'de';
+  // store preference (optional)
+  await supabase.from('users').update({ lang }).eq('chat_id', ctx.chat.id);
+  await ctx.reply(t(lang,'common.lang_set'), homeKeyboard(lang));
 });
 
-// journal
-bot.hears(/^(📒 Journal|Journal)$/i, async (ctx) => {
-  const s = ensureChat(ctx);
-  s.inJournal = true;
-  const key = `modes.${s.mode}.journal_prompt`;
-  await ctx.reply(t(s.lang,key) || t(s.lang,'common.journal_prompt') || 'Tell me what you want to note today.');
-  await ctx.reply(t(s.lang,'common.export_pdf_button') || 'Export PDF', Markup.keyboard([[ '📄 Export PDF', '🎯 Menu' ]]).resize());
+// Open picker
+bot.hears(/^(language|lingua|sprache)$/i, async (ctx) => {
+  await ctx.reply(nonEmpty(t(userLang(ctx),'common.pick_lang')), langKeyboard());
 });
 
-// export PDF
-bot.hears(/^📄 Export PDF$/i, async (ctx) => {
-  const s = ensureChat(ctx);
-  try {
-    const fpath = await exportJournalPdf(ctx.chat.id, s.lang);
-    await ctx.replyWithDocument({ source: fpath });
-    fs.unlink(fpath, ()=>{});
-  } catch (e) {
-    console.error('[pdf]', e);
-    await ctx.reply(t(s.lang,'common.pdf_error') || 'Sorry, I could not create the PDF right now.');
-  }
+// Menu button (just show keys, no extra text)
+bot.hears(/🎯|^menu$/i, async (ctx) => {
+  const lang = userLang(ctx);
+  await ctx.reply(BLANK, homeKeyboard(lang));
 });
 
-// coach
-bot.hears(/^(📌 Coach|Coach)$/i, async (ctx) => {
-  const s = ensureChat(ctx);
-  s.inJournal = false;
-  s.mode = s.mode || 'goal';
-  const key = `modes.${s.mode}.sos_talk_start`;
-  await ctx.reply(t(s.lang, key) || 'Alright, let’s talk. What do you notice first?');
+/* ----- Journal ----- */
+bot.hears(/^📒/i, async (ctx) => {
+  const lang = userLang(ctx);
+  await ctx.reply(t(lang,'common.journal_prompt'));
 });
 
-// progress
-bot.hears(/^(📊 Progress|Progress)$/i, async (ctx) => {
-  const s = ensureChat(ctx);
+// treat any normal message as potential journal text when last action was journal
+// (simple heuristic: if it doesn't match any known button/command, save it)
+const BUTTON_REGEX = /^(📒|📊|📌|⚡|🔗|🎯|\/start|\/refresh|🇮🇹|🇬🇧|🇩🇪)/i;
+bot.on('text', async (ctx, next) => {
+  const txt = (ctx.message.text || '').trim();
+  if (!txt || BUTTON_REGEX.test(txt)) return next();
+
+  // save as journal note
+  await ensureUser(ctx);
+  const ok = await saveJournal(ctx, txt);
+  const lang = userLang(ctx);
+  await ctx.reply(ok ? t(lang,'common.journal_saved') : t(lang,'common.save_error'));
+});
+
+/* ----- Coach ----- */
+bot.hears(/^📌/i, async (ctx) => {
+  const lang = userLang(ctx);
+  await ctx.reply(t(lang,'modes.goal.coach_intro'));
+});
+
+/* ----- SOS ----- */
+bot.hears(/^⚡/i, async (ctx) => {
+  const lang = userLang(ctx);
+  await ctx.reply(t(lang,'common.sos_open'));
+  await ctx.reply(t(lang,'common.sos_tools_intro'));
+});
+
+/* ----- Progress (last entries preview) ----- */
+bot.hears(/^📊/i, async (ctx) => {
+  const lang = userLang(ctx);
   const { data, error } = await supabase
     .from('journal')
-    .select('ts, text')
+    .select('text, ts')
     .eq('chat_id', ctx.chat.id)
-    .order('ts', { ascending: false })
+    .order('id', { ascending: false })
     .limit(5);
-  if (error) {
-    console.error('[progress]', error);
-    return ctx.reply(t(s.lang,'common.progress_error') || 'Could not fetch progress right now.');
-  }
-  if (!data || data.length === 0) {
-    return ctx.reply(t(s.lang,'common.no_entries') || 'No entries yet.');
-  }
-  const lines = data.map(r => `• ${new Date(r.ts).toLocaleString()} — ${r.text.slice(0,80)}`);
-  await ctx.reply((t(s.lang,'common.recent_notes') || 'Your recent notes:') + '\n' + lines.join('\n'));
+  if (error) return ctx.reply(t(lang,'common.progress_error'));
+  if (!data || !data.length) return ctx.reply(t(lang,'common.progress_empty'));
+  const list = data.map(r => `• ${new Date(r.ts).toLocaleString()} — ${r.text}`).join('\n');
+  await ctx.reply(t(lang,'common.progress_wrap', { list }));
 });
 
-// SOS
-bot.hears(/^(⚡️ SOS|SOS)$/i, async (ctx) => {
-  const s = ensureChat(ctx);
-  const key = `modes.${s.mode}.sos_tools_intro`;
-  await ctx.reply(t(s.lang,key) || 'Two quick tools: 4-7-8 breathing and the 5-4-3-2-1 senses game.');
+/* ----- Invite ----- */
+bot.hears(/^🔗/i, async (ctx) => {
+  const lang = userLang(ctx);
+  const link = 'https://t.me/' + (process.env.BOT_USERNAME || 'EverGraceBot'); // set BOT_USERNAME in env if you want
+  await ctx.reply(t(lang,'common.invite_msg', { link }));
 });
 
-// invite
-bot.hears(/^(🔗 Invita|Invite|Invita)$/i, async (ctx) => {
-  const s = ensureChat(ctx);
-  const txt =
-    s.lang==='it' ? 'Invita un’amica: https://t.me/EverGraceRabeBot'
-    : s.lang==='de' ? 'Lade eine Freundin ein: https://t.me/EverGraceRabeBot'
-    : 'Invite a friend: https://t.me/EverGraceRabeBot';
-  await ctx.reply(txt);
+/* ---------------- 10) Error logging ----------------------- */
+bot.catch((err, ctx) => {
+  console.error('Bot error for update', ctx.update?.update_id, err);
 });
 
-// 12) Text handler: journal capture + “question → coach” switch
-bot.on('text', async (ctx) => {
-  const s = ensureChat(ctx);
-  const text = (ctx.message.text || '').trim();
-
-  // ignore command words we already handle
-  if (/^(\/start|\/lang|📄 Export PDF|🎯 Menu|📒 Journal|📌 Coach|📊 Progress|⚡️ SOS|🔗 Invita)$/i.test(text)) return;
-
-  // If we're in a journal capture…
-  if (s.inJournal) {
-    // If the line looks like a question, route to Coach flow automatically.
-    if (/[?？]$/.test(text) || /^(come|how|why|perché|warum)\b/i.test(text)) {
-      s.inJournal = false;
-      await ctx.reply(
-        t(s.lang,'common.question_to_coach') || 'Good question. Let’s explore it together.',
-        homeKeyboard(ctx)
-      );
-      const key = `modes.${s.mode}.sos_talk_start`;
-      return ctx.reply(t(s.lang,key) || 'I’m listening. Close your eyes—what do you notice first?');
-    }
-
-    // Save journal line
-    try {
-      await saveJournal(ctx.chat.id, text);
-      await ctx.reply(
-        t(s.lang, `modes.${s.mode}.journal_saved`) ||
-        t(s.lang,'common.journal_saved') ||
-        'Saved. Anything else?'
-      );
-    } catch (e) {
-      console.error('[sb] insert error', e);
-      await ctx.reply(t(s.lang,'common.save_error') || 'Oops, I could not save. Please try later.');
-    }
-    return;
-  }
-
-  // Fallback small-talk nudge
-  await ctx.reply(' ', homeKeyboard(ctx));
-});
-
-// 13) Launch
-bot.launch().then(() => console.log('EverGrace bot running'));
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+/* ---------------- 11) Launch ------------------------------ */
+bot.launch();
+console.log('EverGrace bot running');
