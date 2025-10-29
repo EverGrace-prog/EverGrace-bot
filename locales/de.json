@@ -87,3 +87,19 @@
     "latest": "Deine neuesten Notizen:"
   }
 }
+{
+  "pdf": {
+    "title": "EverGrace-Journal",
+    "generating": "Erstelle dein PDF…",
+    "ready": "Hier ist es. 💚"
+  },
+  "streak": {
+    "status": "Streak: {days} Tage. Freezes: {freezes}. Letzter Check-in: {date}",
+    "bumped": "Super! Deine Streak ist jetzt {days} Tage.",
+    "same_day": "Check-in für heute gespeichert. Streak bleibt bei {days} Tagen.",
+    "reset": "Neustart. Streak jetzt 1 Tag.",
+    "can_freeze": "Es fehlen ein paar Tage. Nutze /freeze, um die Streak zu retten (du hast {freezes}).",
+    "no_freeze": "Keine Freezes verfügbar.",
+    "freeze_ok": "Freeze genutzt! Streak bleibt bei {days} Tagen."
+  }
+}
