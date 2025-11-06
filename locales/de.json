@@ -4,6 +4,7 @@
     "subtitle": "Willkommen bei EverGrace — ein sanfter Ort für Tagebuch, Coaching und kleine Schritte."
   },
   "common": {
+    "k_menu": "Menü",
     "k_journal": "Journal",
     "k_progress": "Fortschritt",
     "k_coach": "Coach",
@@ -22,16 +23,16 @@
   },
   "modes": {
     "friend": {
-      "journal_prompt": "Woran denkst du heute? 🔥",
+      "journal_prompt": "Woran denkst du heute? ✍️",
       "journal_saved": "Fertig! Möchtest du noch mehr hinzufügen? 😊",
       "sos_open": "Ich bin da. Was ist passiert?",
       "sos_talk_start": "Ich höre zu. Schließe kurz die Augen—was nimmst du zuerst wahr?",
       "sos_tools_intro": "Probieren wir etwas Einfaches: 4-7-8-Atmung oder das 5-4-3-2-1-Sinnesspiel.",
-      "streak_after_checkin": "Super! 💪\n{text}",
+      "streak_after_checkin": "Super! 🔥\n{text}",
       "streak_info_wrap": "Hier ist es:\n{text}"
     },
     "spiritual": {
-      "journal_prompt": "Atme einmal durch. Was möchte dein Herz heute sagen? ✨",
+      "journal_prompt": "Atme einmal durch. Was möchte dein Herz heute sagen? 💫",
       "journal_saved": "Danke fürs Teilen. Noch etwas—ganz behutsam?",
       "sos_open": "Ich sitze still mit dir. Was braucht jetzt Zuwendung?",
       "sos_talk_start": "Hör in den Körper—welche Empfindungen kommen zuerst?",
@@ -54,7 +55,7 @@
     "change_lang": "Sprache",
     "coach_mode": "Coach-Modus",
     "pick_lang": "Wähle deine Sprache:",
-    "lang_ok": "Sprache aktualisiert. ✨"
+    "lang_ok": "Spräche aktualisiert. ✨"
   },
   "invite": {
     "text": "Lade jemanden ein, der dir wichtig ist: {link}"
@@ -85,9 +86,7 @@
   "progress": {
     "empty": "Noch keine Notizen. Starte mit dem Journal ✍️",
     "latest": "Deine neuesten Notizen:"
-  }
-}
-{
+  },
   "pdf": {
     "title": "EverGrace-Journal",
     "generating": "Erstelle dein PDF…",

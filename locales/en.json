@@ -4,6 +4,7 @@
     "subtitle": "Welcome to EverGrace — a gentle place for journaling, coaching, and tiny steps."
   },
   "common": {
+    "k_menu": "Menu",
     "k_journal": "Journal",
     "k_progress": "Progress",
     "k_coach": "Coach",
@@ -13,39 +14,39 @@
     "save_error": "Sorry, I couldn’t save. Please try later.",
     "journal_prompt": "Tell me what you want to note today.",
     "journal_saved": "Saved. Add anything else?",
-    "journal_nudge": "If you want, I can keep it in your journal. Just type.",
+    "journal_nudge": "If you want, I can keep that in your journal. Just type.",
     "sos_open": "Tell me what happened. I’m here with you.",
     "sos_talk_start": "Alright, let’s talk. What do you feel in your body now?",
     "sos_tools_intro": "Two quick tools: 4-7-8 breathing; 5-4-3-2-1 grounding.",
     "streak_after_checkin": "{text}",
-    "streak_info_wrap": "{text}"
+    "streak_info_wrap": "Here you go:\n{text}"
   },
   "modes": {
     "friend": {
-      "journal_prompt": "What’s on your mind today? 🔥",
+      "journal_prompt": "What’s on your mind today? ✍️",
       "journal_saved": "Done! Want to add more? 😊",
       "sos_open": "I’m here. What happened?",
       "sos_talk_start": "I’m listening. Close your eyes—what do you notice first?",
-      "sos_tools_intro": "Let’s try a simple one: 4-7-8 breathing or the 5-4-3-2-1 senses game.",
-      "streak_after_checkin": "Nice! 💪\n{text}",
+      "sos_tools_intro": "Let’s try 4-7-8 breathing or the 5-4-3-2-1 senses game.",
+      "streak_after_checkin": "Nice! 🔥\n{text}",
       "streak_info_wrap": "Here you go:\n{text}"
     },
     "spiritual": {
-      "journal_prompt": "Take a breath. What does your heart wish to say today? ✨",
+      "journal_prompt": "Take a breath. What does your heart wish to say today? 💫",
       "journal_saved": "Thank you for sharing. Anything else, gently?",
       "sos_open": "I’ll sit in quiet with you. What needs care right now?",
       "sos_talk_start": "Listen to the body—what sensations come first?",
-      "sos_tools_intro": "Two brief practices: mindful 4-7-8 breathing and 5-4-3-2-1 grounding.",
+      "sos_tools_intro": "Two brief practices: mindful 4-7-8 and grounding 5-4-3-2-1.",
       "streak_after_checkin": "Step by step. 🌿\n{text}",
       "streak_info_wrap": "The rhythm of your path:\n{text}"
     },
     "goal": {
       "journal_prompt": "Note today’s action and why it matters. 🎯",
       "journal_saved": "Logged. What’s the next micro-step?",
-      "sos_open": "Let’s frame the problem in one sentence. What’s the obstacle?",
-      "sos_talk_start": "What’s the minimum outcome you want in the next 24h?",
+      "sos_open": "Let’s frame the problem in 24h. What’s the obstacle?",
+      "sos_talk_start": "What’s the minimum outcome you can reach in 24h?",
       "sos_tools_intro": "Quick tools: 4-7-8 for focus; 5-4-3-2-1 to reset attention.",
-      "streak_after_checkin": "Input received. Keep going. 💫\n{text}",
+      "streak_after_checkin": "Input recorded. Keep going.\n{text}",
       "streak_info_wrap": "Personal KPIs:\n{text}"
     }
   },
@@ -85,21 +86,19 @@
   "progress": {
     "empty": "No notes yet. Start with the Journal ✍️",
     "latest": "Your recent notes:"
-  }
-}
-{
+  },
   "pdf": {
     "title": "EverGrace Journal",
-    "generating": "Building your PDF…",
+    "generating": "Creating your PDF…",
     "ready": "Here it is. 💚"
   },
   "streak": {
-    "status": "Streak: {days} day(s). Freezes: {freezes}. Last check-in: {date}",
-    "bumped": "Nice! Your streak is now {days} day(s).",
-    "same_day": "Check-in saved for today. Streak stays at {days} day(s).",
-    "reset": "Starting fresh. Streak is now 1 day.",
-    "can_freeze": "You missed some days. Use /freeze to save your streak (you have {freezes}).",
-    "no_freeze": "No freezes available right now.",
-    "freeze_ok": "Freeze used! Streak preserved at {days} day(s)."
+    "status": "Streak: {days} days. Freezes: {freezes}. Last check-in: {date}",
+    "bumped": "Nice! Your streak is now {days} days.",
+    "same_day": "Check-in saved for today. Streak remains {days} days.",
+    "reset": "Restarted. Streak is now 1 day.",
+    "can_freeze": "You missed a day. Use /freeze to save the streak (you have {freezes}).",
+    "no_freeze": "No freezes available.",
+    "freeze_ok": "Freeze used! Streak stays at {days} days."
   }
 }
