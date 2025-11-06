@@ -1,0 +1,15 @@
+#!/bin/bash
+
+cd /c/Users/Utente/Downloads/grace-telegram-bot || {
+  echo "⚠️ Folder not found!"
+  exit 1
+}
+
+echo "✅ Folder found. Deploying EverGrace…"
+
+git add .
+git commit -m "auto update"
+git push origin main
+
+echo "🚀 Push complete! Render should auto-deploy now."
+echo "✅ EverGrace update done!"
