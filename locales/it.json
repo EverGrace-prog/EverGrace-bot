@@ -1,23 +1,16 @@
 {
   "welcome": {
     "hello": "Ciao {name} 🌿",
-    "subtitle": "Benvenutə su EverGrace — il tuo spazio gentile per diario, coaching e piccoli passi."
+    "subtitle": "Benvenut* su HITH — il tuo spazio gentile per diario, coaching e piccoli passi."
   },
   "common": {
-    "k_menu": "Menu",
-    "k_journal": "Journal",
-    "k_progress": "Progress",
-    "k_coach": "Coach",
-    "k_sos": "SOS",
-    "k_invite": "Invita",
-    "k_settings": "Impostazioni",
-    "save_error": "Spiacente, non sono riuscito a salvare. Riprova più tardi.",
+    "save_error": "Ops, non sono riuscito a salvare. Riprova più tardi.",
     "journal_prompt": "Dimmi cosa vuoi annotare oggi.",
     "journal_saved": "Annotato. Vuoi aggiungere altro?",
-    "journal_nudge": "Se vuoi, posso tenerlo nel tuo journal. Scrivi pure.",
+    "journal_nudge": "Se vuoi, posso tenerlo nel diario. Scrivi pure.",
     "sos_open": "Dimmi cos’è successo. Sono qui con te.",
     "sos_talk_start": "Ok, parliamone con calma. Cosa senti nel corpo, adesso?",
-    "sos_tools_intro": "Due tecniche rapide: 4-7-8 respiro; grounding 5-4-3-2-1.",
+    "sos_tools_intro": "Ecco due tecniche rapide: 4-7-8 respiro; grounding 5-4-3-2-1.",
     "streak_after_checkin": "{text}",
     "streak_info_wrap": "Ecco qui:\n{text}"
   },
@@ -25,17 +18,17 @@
     "friend": {
       "journal_prompt": "Raccontami: cosa hai in mente oggi? ✍️",
       "journal_saved": "Fatto! Vuoi aggiungere qualcos’altro? 😊",
-      "sos_open": "Ci sono. Che cosa è successo?",
-      "sos_talk_start": "Ti ascolto. Chiudi un attimo gli occhi—cosa noti per prima?",
-      "sos_tools_intro": "Proviamo 4-7-8 respiro o il gioco dei sensi 5-4-3-2-1.",
+      "sos_open": "Ehi, ci sono. Cosa è successo?",
+      "sos_talk_start": "Ti ascolto. Chiudi un attimo gli occhi… cosa noti per primo?",
+      "sos_tools_intro": "Proviamo qualcosa di semplice: respiro 4-7-8 o il gioco dei sensi 5-4-3-2-1.",
       "streak_after_checkin": "Grande! 🔥\n{text}",
       "streak_info_wrap": "Ecco qui:\n{text}"
     },
     "spiritual": {
       "journal_prompt": "Prenditi un respiro. Cosa desidera esprimere il tuo cuore oggi? 💫",
-      "journal_saved": "Grazie per aver condiviso. Altro, con gentilezza?",
-      "sos_open": "Sono qui in silenzio con te. Cosa chiede cura, adesso?",
-      "sos_talk_start": "Ascoltiamo il corpo: quali sensazioni emergono per prime?",
+      "journal_saved": "Grazie per aver condiviso. Aggiungiamo altro, con gentilezza?",
+      "sos_open": "Sono qui in silenzio con te. Cosa richiede cura, adesso?",
+      "sos_talk_start": "Ascoltiamo il corpo: quali sensazioni emergono per prima?",
       "sos_tools_intro": "Due pratiche brevi: respiro consapevole 4-7-8 e radicamento 5-4-3-2-1.",
       "streak_after_checkin": "Passo dopo passo. 🌿\n{text}",
       "streak_info_wrap": "Il ritmo del tuo cammino:\n{text}"
@@ -44,7 +37,7 @@
       "journal_prompt": "Nota l’azione di oggi e il perché conta. 🎯",
       "journal_saved": "Registrato. Prossimo micro-passo?",
       "sos_open": "Ok, definiamo il problema in una frase. Qual è l’ostacolo?",
-      "sos_talk_start": "Qual è il risultato minimo che puoi ottenere nelle prossime 24h?",
+      "sos_talk_start": "Qual è il risultato minimo che puoi ottenere in 24h?",
       "sos_tools_intro": "Strumenti rapidi: respiro 4-7-8 per focus; 5-4-3-2-1 per reset attentivo.",
       "streak_after_checkin": "Input registrato. Continua così.\n{text}",
       "streak_info_wrap": "KPI personali:\n{text}"
@@ -53,8 +46,8 @@
   "settings": {
     "title": "Impostazioni",
     "change_lang": "Lingua",
-    "coach_mode": "Stile Coach",
-    "pick_lang": "Scegli la tua lingua:",
+    "coach_mode": "Stile coach",
+    "pick_lang": "Scegli la lingua:",
     "lang_ok": "Lingua aggiornata. ✨"
   },
   "invite": {
@@ -69,9 +62,9 @@
     "set_spiritual": "Coach impostato su Spiritualità.",
     "set_goal": "Coach impostato su Vita & Obiettivi.",
     "escalate": "Sembra una domanda da coach — esploriamola insieme.",
-    "friend_intro": "Sono qui. Cosa noti per prima?",
-    "spiritual_intro": "Respira. Cosa è presente nel corpo ora?",
-    "goal_intro": "Qual è il piccolo risultato che vuoi entro 24 ore?",
+    "friend_intro": "Sono qui. Cosa noti per primo?",
+    "spiritual_intro": "Respira. Cosa è presente nel corpo, ora?",
+    "goal_intro": "Quale piccolo risultato vuoi nelle prossime 24 ore?",
     "coach_intro": "Parliamone. Sono qui con te.",
     "coach_reply_hint": "Chiudi gli occhi per un secondo… qual è il primo dettaglio che emerge?"
   },
@@ -86,19 +79,5 @@
   "progress": {
     "empty": "Ancora nessuna nota. Inizia dal Journal ✍️",
     "latest": "Le tue note recenti:"
-  },
-  "pdf": {
-    "title": "EverGrace Journal",
-    "generating": "Creo il tuo PDF…",
-    "ready": "Eccolo. 💚"
-  },
-  "streak": {
-    "status": "Streak: {days} giorni. Freezes: {freezes}. Ultimo check-in: {date}",
-    "bumped": "Ottimo! La tua streak è ora di {days} giorni.",
-    "same_day": "Check-in di oggi salvato. Streak resta {days} giorni.",
-    "reset": "Ripartenza. Streak ora 1 giorno.",
-    "can_freeze": "Hai saltato un giorno. Usa /freeze per salvarla (hai {freezes}).",
-    "no_freeze": "Nessun freeze disponibile.",
-    "freeze_ok": "Freeze usato! La streak resta a {days} giorni."
   }
 }

@@ -1,16 +1,9 @@
 {
   "welcome": {
     "hello": "Hi {name} 🌿",
-    "subtitle": "Welcome to EverGrace — a gentle place for journaling, coaching, and tiny steps."
+    "subtitle": "Welcome to HITH — a gentle place for journaling, coaching, and tiny steps."
   },
   "common": {
-    "k_menu": "Menu",
-    "k_journal": "Journal",
-    "k_progress": "Progress",
-    "k_coach": "Coach",
-    "k_sos": "SOS",
-    "k_invite": "Invite",
-    "k_settings": "Settings",
     "save_error": "Sorry, I couldn’t save. Please try later.",
     "journal_prompt": "Tell me what you want to note today.",
     "journal_saved": "Saved. Add anything else?",
@@ -86,19 +79,5 @@
   "progress": {
     "empty": "No notes yet. Start with the Journal ✍️",
     "latest": "Your recent notes:"
-  },
-  "pdf": {
-    "title": "EverGrace Journal",
-    "generating": "Creating your PDF…",
-    "ready": "Here it is. 💚"
-  },
-  "streak": {
-    "status": "Streak: {days} days. Freezes: {freezes}. Last check-in: {date}",
-    "bumped": "Nice! Your streak is now {days} days.",
-    "same_day": "Check-in saved for today. Streak remains {days} days.",
-    "reset": "Restarted. Streak is now 1 day.",
-    "can_freeze": "You missed a day. Use /freeze to save the streak (you have {freezes}).",
-    "no_freeze": "No freezes available.",
-    "freeze_ok": "Freeze used! Streak stays at {days} days."
   }
 }

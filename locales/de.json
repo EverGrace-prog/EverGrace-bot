@@ -1,16 +1,9 @@
 {
   "welcome": {
     "hello": "Hallo {name} 🌿",
-    "subtitle": "Willkommen bei EverGrace — ein sanfter Ort für Tagebuch, Coaching und kleine Schritte."
+    "subtitle": "Willkommen bei HITH — ein sanfter Ort für Tagebuch, Coaching und kleine Schritte."
   },
   "common": {
-    "k_menu": "Menü",
-    "k_journal": "Journal",
-    "k_progress": "Fortschritt",
-    "k_coach": "Coach",
-    "k_sos": "SOS",
-    "k_invite": "Einladen",
-    "k_settings": "Einstellungen",
     "save_error": "Sorry, das Speichern ist fehlgeschlagen. Bitte versuche es später erneut.",
     "journal_prompt": "Erzähl mir, was du heute notieren möchtest.",
     "journal_saved": "Gespeichert. Möchtest du noch etwas hinzufügen?",
@@ -27,15 +20,15 @@
       "journal_saved": "Fertig! Möchtest du noch mehr hinzufügen? 😊",
       "sos_open": "Ich bin da. Was ist passiert?",
       "sos_talk_start": "Ich höre zu. Schließe kurz die Augen—was nimmst du zuerst wahr?",
-      "sos_tools_intro": "Probieren wir etwas Einfaches: 4-7-8-Atmung oder das 5-4-3-2-1-Sinnesspiel.",
+      "sos_tools_intro": "Probieren wir 4-7-8-Atmung oder das 5-4-3-2-1-Sinnesspiel.",
       "streak_after_checkin": "Super! 🔥\n{text}",
       "streak_info_wrap": "Hier ist es:\n{text}"
     },
     "spiritual": {
       "journal_prompt": "Atme einmal durch. Was möchte dein Herz heute sagen? 💫",
-      "journal_saved": "Danke fürs Teilen. Noch etwas—ganz behutsam?",
-      "sos_open": "Ich sitze still mit dir. Was braucht jetzt Zuwendung?",
-      "sos_talk_start": "Hör in den Körper—welche Empfindungen kommen zuerst?",
+      "journal_saved": "Danke fürs Teilen. Noch etwas — ganz behutsam?",
+      "sos_open": "Ich sitze still mit dir. Was braucht gerade Zuwendung?",
+      "sos_talk_start": "Hör in den Körper — welche Empfindungen kommen zuerst?",
       "sos_tools_intro": "Zwei kurze Übungen: achtsame 4-7-8-Atmung und 5-4-3-2-1-Grounding.",
       "streak_after_checkin": "Schritt für Schritt. 🌿\n{text}",
       "streak_info_wrap": "Der Rhythmus deines Weges:\n{text}"
@@ -43,10 +36,10 @@
     "goal": {
       "journal_prompt": "Notiere die heutige Aktion und warum sie zählt. 🎯",
       "journal_saved": "Erfasst. Was ist der nächste Mikro-Schritt?",
-      "sos_open": "Fassen wir das Problem in einem Satz zusammen. Was ist das Hindernis?",
-      "sos_talk_start": "Welches Mindest-Ergebnis möchtest du in den nächsten 24 h?",
+      "sos_open": "Fassen wir das Problem in einem Satz. Was ist das Hindernis?",
+      "sos_talk_start": "Welches Mindest-Ergebnis möchtest du in 24 h?",
       "sos_tools_intro": "Schnelle Tools: 4-7-8 für Fokus; 5-4-3-2-1 für einen Aufmerksamkeits-Reset.",
-      "streak_after_checkin": "Notiert. Weiter so. 💫\n{text}",
+      "streak_after_checkin": "Notiert. Weiter so.\n{text}",
       "streak_info_wrap": "Persönliche KPIs:\n{text}"
     }
   },
@@ -55,7 +48,7 @@
     "change_lang": "Sprache",
     "coach_mode": "Coach-Modus",
     "pick_lang": "Wähle deine Sprache:",
-    "lang_ok": "Spräche aktualisiert. ✨"
+    "lang_ok": "Sprache aktualisiert. ✨"
   },
   "invite": {
     "text": "Lade jemanden ein, der dir wichtig ist: {link}"
@@ -86,19 +79,5 @@
   "progress": {
     "empty": "Noch keine Notizen. Starte mit dem Journal ✍️",
     "latest": "Deine neuesten Notizen:"
-  },
-  "pdf": {
-    "title": "EverGrace-Journal",
-    "generating": "Erstelle dein PDF…",
-    "ready": "Hier ist es. 💚"
-  },
-  "streak": {
-    "status": "Streak: {days} Tage. Freezes: {freezes}. Letzter Check-in: {date}",
-    "bumped": "Super! Deine Streak ist jetzt {days} Tage.",
-    "same_day": "Check-in für heute gespeichert. Streak bleibt bei {days} Tagen.",
-    "reset": "Neustart. Streak jetzt 1 Tag.",
-    "can_freeze": "Es fehlen ein paar Tage. Nutze /freeze, um die Streak zu retten (du hast {freezes}).",
-    "no_freeze": "Keine Freezes verfügbar.",
-    "freeze_ok": "Freeze genutzt! Streak bleibt bei {days} Tagen."
   }
 }
