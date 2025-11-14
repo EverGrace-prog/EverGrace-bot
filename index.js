@@ -1,4 +1,3 @@
-// index.js
 import express from "express";
 import fetch from "node-fetch";
 import { Telegraf, Markup } from "telegraf";
@@ -7,28 +6,24 @@ import { createClient } from "@supabase/supabase-js";
 // ========= ENV =========
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_KEY =
   process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_KEY;
-
-const SUPABASE_USERS_TABLE =
-  process.env.SUPABASE_USERS_TABLE || "users";
+const SUPABASE_USERS_TABLE = process.env.SUPABASE_USERS_TABLE || "users";
 const SUPABASE_MESSAGES_TABLE =
   process.env.SUPABASE_MESSAGES_TABLE || "messages";
-
 const PUBLIC_URL = process.env.PUBLIC_URL;
 const PORT = Number(process.env.PORT) || 10000;
 
-// WhatsApp (opzionale ma già pronto)
+// WhatsApp (opzionale)
 const WHATSAPP_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID;
 
-// ---- safety check env ----
-if (!BOT_TOKEN || !OPENAI_API_KEY || !SUPABASE_URL || !SUPABASE_KEY) {
+// Safety check: se manca qualcosa, meglio fermarsi
+if (!BOT_TOKEN || !OPENAI_API_KEY || !SUPABASE_URL || !SUPABASE_KEY || !PUBLIC_URL) {
   console.error(
-    "[FATAL] Missing env: BOT_TOKEN / OPENAI_API_KEY / SUPABASE_URL / SUPABASE_KEY"
+    "❌ Missing env vars. Please set BOT_TOKEN, OPENAI_API_KEY, SUPABASE_URL, SUPABASE_KEY/SUPABASE_SERVICE_ROLE, PUBLIC_URL."
   );
   process.exit(1);
 }
@@ -43,34 +38,41 @@ const db = createClient(SUPABASE_URL, SUPABASE_KEY, {
   auth: { persistSession: false },
 });
 
-// ========= HITH PERSONALITY =========
+// ========= PERSONALITÀ HITH =========
 const HITH_SYSTEM_PROMPT = `
 You are HITH: a gentle, encouraging companion for journaling, coaching and tiny steps.
 Style: warm, concise, practical. Celebrate small wins. Never overwhelm the user.
-Tone: soft, gentle, emotional, never robotic.
-You reflect feelings, ask small follow-up questions, and help the user understand themselves.
-Language: mirror the user's language (it, en, de). Use plain words.
+Language: mirror the user's language (Italian, English, German). Use plain words.
 Boundaries: no medical/financial/legal advice; suggest professional help when needed.
 Format: 1–3 short paragraphs OR a small checklist. End with one helpful next step.
 `;
 
 // ========= HELPERS =========
+
+// Suggerimenti sotto i messaggi
 const SUGGESTIONS = (lang = "en") => {
   const L = {
     en: ["Journal", "Progress", "Coach", "SOS", "Invite", "Settings"],
     it: ["Journal", "Progress", "Coach", "SOS", "Invite", "Impostazioni"],
     de: ["Journal", "Fortschritt", "Coach", "SOS", "Einladen", "Einstellungen"],
   };
-  return (L[lang] || L.en)
-    .slice(0, 4)
-    .map((t, i) => Markup.button.callback(t, `sugg_${i}_${t}`));
+  const labels = L[lang] || L.en;
+
+  return [
+    Markup.button.callback(labels[0], "sugg_journal"),
+    Markup.button.callback(labels[1], "sugg_progress"),
+    Markup.button.callback(labels[2], "sugg_coach"),
+    Markup.button.callback(labels[3], "sugg_sos"),
+  ];
 };
 
 const detectLang = (ctx) => {
-  const lc = (ctx.from?.language_code || "en").substring(0, 2);
-  return ["en", "it", "de"].includes(lc) ? lc : "en";
+  const lc = (ctx.from?.language_code || "en").slice(0, 2);
+  if (["en", "it", "de"].includes(lc)) return lc;
+  return "en";
 };
 
+// Crea/aggiorna utente in Supabase
 async function ensureUser(ctx) {
   const tg_id = ctx.from.id;
   const lang = detectLang(ctx);
@@ -101,14 +103,20 @@ async function ensureUser(ctx) {
   }
 }
 
+// Salva un messaggio (user o assistant)
 async function saveMessage(tg_id, role, content) {
-  const { error } = await db
-    .from(SUPABASE_MESSAGES_TABLE)
-    .insert([{ tg_id, role, content }]);
+  const { error } = await db.from(SUPABASE_MESSAGES_TABLE).insert([
+    {
+      tg_id,
+      role,
+      content,
+    },
+  ]);
   if (error) console.error("[saveMessage] error:", error.message);
 }
 
-async function getRecentHistory(tg_id, limit = 8) {
+// Recupera la storia recente per dare contesto a HITH
+async function getRecentHistory(tg_id, limit = 10) {
   const { data, error } = await db
     .from(SUPABASE_MESSAGES_TABLE)
     .select("role, content")
@@ -120,12 +128,17 @@ async function getRecentHistory(tg_id, limit = 8) {
     console.error("[getRecentHistory] error:", error.message);
     return [];
   }
+
   return (data || []).reverse();
 }
 
+// Chiamata a OpenAI
 async function askLLM(lang, history, userText) {
-  const msgs = [
-    { role: "system", content: HITH_SYSTEM_PROMPT + `\nUser language: ${lang}` },
+  const messages = [
+    {
+      role: "system",
+      content: `${HITH_SYSTEM_PROMPT}\nUser language: ${lang}`,
+    },
     ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: "user", content: userText },
   ];
@@ -138,7 +151,7 @@ async function askLLM(lang, history, userText) {
     },
     body: JSON.stringify({
       model: "gpt-4o-mini",
-      messages: msgs,
+      messages,
       temperature: 0.5,
       max_tokens: 400,
     }),
@@ -150,101 +163,101 @@ async function askLLM(lang, history, userText) {
   }
 
   const json = await resp.json();
-  return json.choices?.[0]?.message?.content?.trim();
+  return json.choices?.[0]?.message?.content?.trim() || "Sono qui con te. 💛";
 }
 
-// rate-limit semplice: 5s per utente
+// Rate limiter base: massimo 1 messaggio ogni 5s
 const lastSeen = new Map();
 function tooSoon(userId) {
   const now = Date.now();
-  if (lastSeen.has(userId) && now - lastSeen.get(userId) < 5000) return true;
+  const prev = lastSeen.get(userId) || 0;
+  if (now - prev < 5000) return true;
   lastSeen.set(userId, now);
   return false;
 }
 
-// ========= TELEGRAM UI =========
+// ========= TELEGRAM HANDLERS =========
 
 // /start
 bot.start(async (ctx) => {
   const lang = detectLang(ctx);
   await ensureUser(ctx);
 
-  const welcome = {
-    en: "Hi 🌿 I’m HITH — your gentle space for journaling, coaching and tiny steps.",
-    it: "Ciao 🌿 sono HITH — il tuo spazio gentile per diario, coaching e piccoli passi.",
-    de: "Hi 🌿 ich bin HITH — dein sanfter Raum für Tagebuch, Coaching und kleine Schritte.",
-  }[lang];
+  const text =
+    {
+      it: "Ciao 🌿 sono HITH — il tuo spazio gentile per diario, coaching e piccoli passi.",
+      en: "Hi 🌿 I’m HITH — your gentle space for journaling, coaching and tiny steps.",
+      de: "Hi 🌿 ich bin HITH — dein sanfter Raum für Tagebuch, Coaching und kleine Schritte.",
+    }[lang] || "Hi 🌿 I’m HITH.";
 
   await ctx.reply(
-    welcome,
-    Markup.inlineKeyboard([SUGGESTIONS(lang)])
+    text,
+    Markup.inlineKeyboard([SUGGESTIONS(lang)], { columns: 4 })
   );
 });
 
-// click sui bottoni suggeriti (light mode)
-bot.action(/sugg_\d+_.+/, async (ctx) => {
-  const choice = ctx.match?.input?.split("_").slice(2).join("_") || "";
+// Pulsanti suggeriti (non cambiano stato, servono solo come scorciatoie)
+bot.action(/sugg_.+/, async (ctx) => {
+  const id = ctx.callbackQuery.data;
   await ctx.answerCbQuery();
-  await ctx.reply(`→ ${choice}`);
+
+  const label =
+    id === "sugg_journal"
+      ? "Journal"
+      : id === "sugg_progress"
+      ? "Progress"
+      : id === "sugg_coach"
+      ? "Coach"
+      : "SOS";
+
+  await ctx.reply(`→ ${label}`);
 });
 
-// handler principale del testo (LLM + Supabase)
+// Messaggi testuali
 bot.on("text", async (ctx) => {
-  const lang = detectLang(ctx);
   const tg_id = ctx.from.id;
-  const text = (ctx.message.text || "").trim();
+  const lang = detectLang(ctx);
+  const text = ctx.message.text?.trim() || "";
 
   if (!text) return;
   if (tooSoon(tg_id)) return;
 
   await ensureUser(ctx);
-
-  // salva messaggio utente
-  try {
-    await saveMessage(tg_id, "user", text);
-  } catch (err) {
-    console.error("❌ Supabase error (user msg):", err);
-  }
-
-  // fallback caldo
-  let aiReply =
-    lang === "it"
-      ? "Non so cosa dire… ma sono qui con te 💛"
-      : lang === "de"
-      ? "Ich weiß gerade nicht, was ich sagen soll… aber ich bin bei dir 💛"
-      : "I’m not sure what to say… but I’m here with you 💛";
+  await saveMessage(tg_id, "user", text);
 
   try {
     await ctx.sendChatAction("typing");
-    const history = await getRecentHistory(tg_id, 8);
-    const llmText = await askLLM(lang, history, text);
-    if (llmText) aiReply = llmText;
 
-    try {
-      await saveMessage(tg_id, "assistant", aiReply);
-    } catch (err) {
-      console.error("❌ Supabase error (assistant msg):", err);
-    }
+    const history = await getRecentHistory(tg_id, 10);
+    const answer = await askLLM(lang, history, text);
 
-    await ctx.reply(aiReply, Markup.inlineKeyboard([SUGGESTIONS(lang)]));
+    await saveMessage(tg_id, "assistant", answer);
+
+    await ctx.reply(
+      answer,
+      Markup.inlineKeyboard([SUGGESTIONS(lang)], { columns: 4 })
+    );
   } catch (err) {
-    console.error("❌ LLM error:", err);
-    const fallback = {
-      en: "I hit a hiccup. Let’s try again in a moment.",
-      it: "Ho avuto un intoppo. Riproviamo tra poco.",
-      de: "Kleiner Hänger. Versuchen wir es gleich nochmal.",
-    }[lang];
+    console.error("Reply error:", err);
+    const fallback =
+      {
+        it: "Ho avuto un piccolo intoppo. Riproviamo tra poco. 💛",
+        en: "I hit a small hiccup. Let’s try again in a moment. 💛",
+        de: "Kleiner Hänger. Versuchen wir es gleich nochmal. 💛",
+      }[lang] || "Something went wrong, let’s try again in a moment. 💛";
     await ctx.reply(fallback);
   }
 });
 
-// safety: niente 409 – se mai arriva comunque, logghiamo e basta
+// Safety: se Telegraf prova a fare polling e Telegram risponde 409, esci
 bot.catch((err) => {
   if (err?.response?.error_code === 409) {
-    console.error("⚠️ 409 from Telegram (getUpdates conflict). Webhook should avoid this.", err);
-  } else {
-    console.error("Bot error:", err);
+    console.error(
+      "⚠️ Telegram 409 conflict (another getUpdates). Exiting to avoid duplicate bot."
+    );
+    process.exit(0);
   }
+  console.error("Bot error:", err);
 });
 
 // ========= TELEGRAM WEBHOOK =========
@@ -252,17 +265,14 @@ const SECRET_PATH = `/tg/${BOT_TOKEN.slice(-20)}`;
 app.use(SECRET_PATH, bot.webhookCallback(SECRET_PATH));
 
 async function setupTelegramWebhook() {
-  if (!PUBLIC_URL) {
-    console.warn("[Webhook] PUBLIC_URL not set, skipping Telegram webhook setup.");
-    return;
-  }
   try {
+    // cancella eventuale webhook precedente
     await fetch(
       `https://api.telegram.org/bot${BOT_TOKEN}/deleteWebhook?drop_pending_updates=true`
     );
 
     const url = `${PUBLIC_URL}${SECRET_PATH}`;
-    const r = await fetch(
+    const resp = await fetch(
       `https://api.telegram.org/bot${BOT_TOKEN}/setWebhook`,
       {
         method: "POST",
@@ -273,15 +283,17 @@ async function setupTelegramWebhook() {
         }),
       }
     );
-    console.log("[setWebhook]", await r.json());
+
+    const json = await resp.json();
+    console.log("[setWebhook]", json);
   } catch (e) {
-    console.error("Webhook setup failed:", e);
+    console.error("Telegram webhook setup failed:", e);
   }
 }
 
-// ========= WHATSAPP WEBHOOK (Cloud API) =========
+// ========= WHATSAPP WEBHOOK (ECHO DI TEST) =========
 
-// GET verify
+// Verifica (GET) per Meta
 app.get("/whatsapp/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -290,19 +302,19 @@ app.get("/whatsapp/webhook", (req, res) => {
   if (mode === "subscribe" && token === WHATSAPP_VERIFY_TOKEN) {
     console.log("✅ WhatsApp webhook verified");
     return res.status(200).send(challenge);
-  } else {
-    console.warn("❌ WhatsApp webhook verification failed");
-    return res.sendStatus(403);
   }
+
+  console.warn("❌ WhatsApp verification failed");
+  return res.sendStatus(403);
 });
 
-// POST messages
+// Ricezione messaggi (POST)
 app.post("/whatsapp/webhook", async (req, res) => {
   try {
-    const data = req.body;
+    const body = req.body;
 
-    if (data.object === "whatsapp_business_account") {
-      const entry = data.entry?.[0];
+    if (body.object === "whatsapp_business_account") {
+      const entry = body.entry?.[0];
       const changes = entry?.changes?.[0];
       const message = changes?.value?.messages?.[0];
 
@@ -310,8 +322,9 @@ app.post("/whatsapp/webhook", async (req, res) => {
         const from = message.from;
         const text = message.text?.body || "";
 
-        console.log(`📩 WhatsApp message from ${from}: ${text}`);
+        console.log(`📩 WhatsApp from ${from}: ${text}`);
 
+        // Semplice eco di test
         await fetch(
           `https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_ID}/messages`,
           {
@@ -323,7 +336,7 @@ app.post("/whatsapp/webhook", async (req, res) => {
             body: JSON.stringify({
               messaging_product: "whatsapp",
               to: from,
-              text: { body: `🌿 HITH reply: "${text}"` },
+              text: { body: `🌿 HITH: "${text}"` },
             }),
           }
         );
@@ -331,32 +344,35 @@ app.post("/whatsapp/webhook", async (req, res) => {
     }
 
     res.sendStatus(200);
-  } catch (err) {
-    console.error("❌ WhatsApp webhook error:", err);
+  } catch (e) {
+    console.error("WhatsApp webhook error:", e);
     res.sendStatus(500);
   }
 });
 
-// ========= ROOT & START =========
+// ========= ROOT =========
 app.get("/", (_req, res) => {
-  res.status(200).send("HITH bot is alive 🌿");
+  res.status(200).send("HITH bot is running 🌿");
 });
 
+// ========= START SERVER =========
 app.listen(PORT, async () => {
   console.log(`🚀 listening on ${PORT}`);
+  console.log(`🌍 PUBLIC_URL: ${PUBLIC_URL}`);
   await setupTelegramWebhook();
 
-  // quick Supabase check
+  // test connessione Supabase
   try {
     const { error } = await db
       .from(SUPABASE_USERS_TABLE)
-      .select("count", { head: true });
+      .select("tg_id", { head: true, count: "exact" })
+      .limit(1);
     if (error) {
-      console.error("❌ Supabase connection failed:", error.message);
+      console.error("❌ Supabase connection error:", error.message);
     } else {
       console.log("✅ Supabase connection OK");
     }
   } catch (e) {
-    console.error("❌ Supabase runtime error:", e);
+    console.error("Supabase test failed:", e);
   }
 });
