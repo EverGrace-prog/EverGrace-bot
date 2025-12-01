@@ -13,7 +13,7 @@ const SUPABASE_USERS_TABLE = process.env.SUPABASE_USERS_TABLE || "users";
 const SUPABASE_MESSAGES_TABLE =
   process.env.SUPABASE_MESSAGES_TABLE || "messages";
 const PUBLIC_URL = process.env.PUBLIC_URL;
-const PORT = Number(process.env.PORT) || 10000;
+const PORT = process.env.PORT || 3000;
 
 // WhatsApp (opzionale)
 const WHATSAPP_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
