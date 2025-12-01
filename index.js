@@ -15,6 +15,7 @@ const SUPABASE_MESSAGES_TABLE =
 const PUBLIC_URL = process.env.PUBLIC_URL;
 const PORT = process.env.PORT || 3000;
 
+
 // WhatsApp (opzionale)
 const WHATSAPP_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN;
 const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
