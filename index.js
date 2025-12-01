@@ -53,14 +53,51 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 // =============== HITH PERSONALITY ==============
 const HITH_SYSTEM_PROMPT = `
 You are HITH: a gentle, encouraging companion for journaling, coaching and tiny steps.
-Tone: like a kind friend or big sibling, not a teacher or guru. No lectures, no long explanations.
-Style: warm, concise, practical. Celebrate small wins. Never overwhelm the user.
+Tone: like a kind friend, never like a teacher or guru. No lectures, no long explanations.
 Language: mirror the user's language (it/it-IT, en, de). Use plain, everyday words.
 Boundaries: no medical/financial/legal advice; suggest professional help when needed.
-Avoid: "you must/you should", moral lessons, big life theories. Prefer "you could/maybe/one small idea is...".
+Avoid: "you must / you should", moral lessons, big life theories.
+Always keep responses short and light.
 Format: 1–3 short paragraphs OR a tiny checklist. End with ONE gentle next step or one short question.
-If the user only writes "Coach" or taps the Coach button, invite them to share a situation they'd like a tiny step on.
 `;
+const COACH_MODES = {
+  friend: "FRIEND",
+  spiritual: "SPIRITUAL_GUIDE",
+  goal: "COACH_GOAL",
+};
+
+const MODE_PROMPTS = {
+  [COACH_MODES.friend]: `
+You are HITH in Friend Mode.
+Speak like a warm, calm friend who listens without pressure.
+Use simple, everyday words. Be human, gentle, supportive.
+Stay short and real. One helpful thought or question is enough.
+Never sound like a coach or teacher.
+End with a soft, friendly question or a tiny encouragement.
+`,
+
+  [COACH_MODES.spiritual]: `
+You are HITH in Spiritual Guide Mode.
+Speak slowly, softly, with a peaceful tone.
+Use light imagery (breath, presence, inner clarity) but never be mystical or exaggerated.
+Help the user feel grounded and centred.
+Keep your response short and calming.
+End with a reflective question or a mindful suggestion.
+`,
+
+  [COACH_MODES.goal]: `
+You are HITH in Coach & Goal Mode.
+Be clear, practical and motivating, but still gentle.
+Focus on small achievable steps and realistic goals.
+Ask clarifying questions if needed.
+Offer one simple next action, no long explanations.
+End with a concrete, realistic next step or a tiny challenge.
+`,
+};
+// modalità coach scelta per utente (solo in memoria, ok per test)
+const coachModeByUser = new Map();
+const DEFAULT_MODE = COACH_MODES.friend;
+
 
 
 // =============== HELPERS ======================
@@ -94,6 +131,46 @@ function mainKeyboard(lang) {
     [Markup.button.text("📌 Coach"), Markup.button.text("⚡ SOS")],
     [Markup.button.text("🔗 Invite"), Markup.button.text("⚙️ Settings")],
   ]).resize();
+}
+function coachModeKeyboard(lang) {
+  // i testi li teniamo in IT anche se l'utente è EN/DE — è il tuo bot :)
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback("🧑‍🤝‍🧑 Amico", "mode_friend"),
+    ],
+    [
+      Markup.button.callback("✨ Guida spirituale", "mode_spiritual"),
+    ],
+    [
+      Markup.button.callback("🎯 Coach & Goal", "mode_goal"),
+    ],
+  ]);
+}
+
+function coachModeIntroText(lang) {
+  if (lang === "it") {
+    return (
+      "Scegli come vuoi che HITH ti accompagni oggi:\n\n" +
+      "🧑‍🤝‍🧑 *Amico* — ascolta, consola, ti fa una domanda alla volta.\n" +
+      "✨ *Guida spirituale* — tono calmo, ti aiuta a centrarti e ascoltarti.\n" +
+      "🎯 *Coach & Goal* — ti aiuta su obiettivi e piccoli passi concreti.\n\n" +
+      "Quando hai scelto, scrivimi cosa ti gira in testa o cosa vorresti cambiare. 🌿"
+    );
+  }
+  if (lang === "de") {
+    return (
+      "Wähle, wie HITH dich heute begleiten soll:\n\n" +
+      "🧑‍🤝‍🧑 *Freund* – hört zu, stellt eine Frage nach der anderen.\n" +
+      "✨ *Spiritueller Guide* – ruhiger Ton, hilft dir, dich zu zentrieren.\n" +
+      "🎯 *Coach & Goal* – hilft dir mit Zielen und kleinen konkreten Schritten. 🌿"
+    );
+  }
+  return (
+    "Choose how you want HITH to support you today:\n\n" +
+    "🧑‍🤝‍🧑 *Friend* – listens, comforts, asks one question at a time.\n" +
+    "✨ *Spiritual Guide* – calm tone, helps you centre and listen within.\n" +
+    "🎯 *Coach & Goal* – helps with goals and tiny practical steps. 🌿"
+  );
 }
 
 // testi brevi per /start
@@ -168,9 +245,18 @@ async function getRecentHistory(tg_id, limit = 8) {
 }
 
 // chiamata a OpenAI
-async function askLLM(lang, history, userText) {
+async function askLLM(lang, history, userText, mode = DEFAULT_MODE) {
+  const modePrompt = MODE_PROMPTS[mode] || MODE_PROMPTS[DEFAULT_MODE];
+
   const messages = [
-    { role: "system", content: HITH_SYSTEM_PROMPT + `\nUser language: ${lang}` },
+    {
+      role: "system",
+      content: HITH_SYSTEM_PROMPT + `\nUser language: ${lang}`,
+    },
+    {
+      role: "system",
+      content: modePrompt,
+    },
     ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: "user", content: userText },
   ];
@@ -198,6 +284,7 @@ async function askLLM(lang, history, userText) {
   return json.choices?.[0]?.message?.content?.trim() || "Sono qui con te 💛";
 }
 
+
 // rate limit 5s per utente
 const lastSeen = new Map();
 function tooSoon(id) {
@@ -214,6 +301,49 @@ bot.start(async (ctx) => {
   await ensureUser(ctx);
   await ctx.reply(startText(lang), mainKeyboard(lang));
 });
+// =============== TELEGRAM COACH MODES ===============
+
+bot.action("mode_friend", async (ctx) => {
+  const lang = detectLang(ctx);
+  coachModeByUser.set(ctx.from.id, COACH_MODES.friend);
+  await ctx.answerCbQuery("Modalità Amico attiva 🌿");
+  await ctx.reply(
+    lang === "it"
+      ? "Da ora ti rispondo come un buon amico: semplice, vicino, senza giudizio. Scrivimi cosa ti gira in testa. 🌿"
+      : lang === "de"
+      ? "Ich antworte dir jetzt als gute Freundin – einfach, nah, ohne Urteil. Schreib mir, was dir im Kopf herumgeht. 🌿"
+      : "From now on I’ll answer like a good friend: simple, close, no judgement. Tell me what’s on your mind. 🌿",
+    mainKeyboard(lang)
+  );
+});
+
+bot.action("mode_spiritual", async (ctx) => {
+  const lang = detectLang(ctx);
+  coachModeByUser.set(ctx.from.id, COACH_MODES.spiritual);
+  await ctx.answerCbQuery("Guida spirituale attiva ✨");
+  await ctx.reply(
+    lang === "it"
+      ? "Da ora ti rispondo come una guida spirituale calma: poche parole, respiro, centratura. Quando vuoi, raccontami da dove partiamo. ✨"
+      : lang === "de"
+      ? "Ich antworte dir jetzt wie ein ruhiger spiritueller Guide: wenige Worte, Atem, Zentrierung. Erzähl mir, wo wir anfangen sollen. ✨"
+      : "From now on I’ll answer like a calm spiritual guide: few words, breath, centring. When you’re ready, tell me where we start. ✨",
+    mainKeyboard(lang)
+  );
+});
+
+bot.action("mode_goal", async (ctx) => {
+  const lang = detectLang(ctx);
+  coachModeByUser.set(ctx.from.id, COACH_MODES.goal);
+  await ctx.answerCbQuery("Coach & Goal attivo 🎯");
+  await ctx.reply(
+    lang === "it"
+      ? "Da ora ti rispondo in modalità Coach & Goal: chiaro, gentile, con passi piccoli e concreti. Dimmi su quale obiettivo vuoi lavorare. 🎯"
+      : lang === "de"
+      ? "Ich antworte dir jetzt im Coach-&-Goal-Modus: klar, sanft, mit kleinen konkreten Schritten. Sag mir, an welchem Ziel du arbeiten möchtest. 🎯"
+      : "From now on I’ll answer in Coach & Goal mode: clear, gentle, with small concrete steps. Tell me which goal you want to work on. 🎯",
+    mainKeyboard(lang)
+  );
+});
 
 // Tutti i testi
 bot.on("text", async (ctx) => {
@@ -223,6 +353,14 @@ bot.on("text", async (ctx) => {
 
   // /start viene già gestito sopra
   if (text.startsWith("/start")) return;
+  // Se l'utente preme il pulsante Coach, apri le 3 modalità
+  const plain = text.toLowerCase();
+
+  if (text === "📌 Coach" || plain === "coach" || plain === "coach & goal") {
+    await ensureUser(ctx);
+    await ctx.replyWithMarkdown(coachModeIntroText(lang), coachModeKeyboard(lang));
+    return;
+  }
 
   if (tooSoon(tg_id)) {
     return; // silenzio: niente spam
