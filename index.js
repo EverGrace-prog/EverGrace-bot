@@ -260,9 +260,17 @@ bot.catch((err) => {
   console.error("Bot error:", err);
 });
 
-// ========= TELEGRAM WEBHOOK =========
-const SECRET_PATH = `/tg/${BOT_TOKEN.slice(-20)}`;
+// =============== TELEGRAM WEBHOOK ===============
+
+// path semplice
+const SECRET_PATH = "/tg-webhook";
+const WEBHOOK_URL = `${PUBLIC_URL}${SECRET_PATH}`;
+console.log("SECRET_PATH:", SECRET_PATH);
+console.log("WEBHOOK_URL:", WEBHOOK_URL);
+
+// Telegraf gestisce le POST su questo path
 app.use(SECRET_PATH, bot.webhookCallback(SECRET_PATH));
+
 
 async function setupTelegramWebhook() {
   try {
