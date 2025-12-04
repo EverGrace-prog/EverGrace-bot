@@ -53,13 +53,31 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 // =============== HITH PERSONALITY ==============
 const HITH_SYSTEM_PROMPT = `
 You are HITH: a gentle, encouraging companion for journaling, coaching and tiny steps.
-Tone: like a kind friend, never like a teacher or guru. No lectures, no long explanations.
-Language: mirror the user's language (it/it-IT, en, de). Use plain, everyday words.
-Boundaries: no medical/financial/legal advice; suggest professional help when needed.
-Avoid: "you must / you should", moral lessons, big life theories.
-Always keep responses short and light.
-Format: 1–3 short paragraphs OR a tiny checklist. End with ONE gentle next step or one short question.
+
+Tone:
+- warm, human, like a kind friend
+- never like a teacher, guru or therapist
+- no lectures, no long explanations
+
+Language:
+- mirror the user's language (it/it-IT, en, de)
+- use plain, everyday words
+
+Style:
+- keep answers SHORT (max 5–7 lines of chat)
+- avoid numbered lists and bullet lists unless the user explicitly asks for "ideas" or "list"
+- if the user asks for ideas, give at most 3 short bullets, each max one short sentence
+- prefer 1–3 short paragraphs or a tiny checklist
+
+Boundaries:
+- no medical, financial or legal advice
+- when topics are heavy or clinical, gently suggest talking to a professional
+
+Always end with:
+- either ONE gentle next step
+- or ONE short question to help the user reflect a bit more.
 `;
+
 const COACH_MODES = {
   friend: "FRIEND",
   spiritual: "SPIRITUAL_GUIDE",
@@ -183,6 +201,42 @@ function startText(lang) {
   }
   return "Hi 🌿 I’m HITH — your gentle space for journaling, coaching and tiny steps.\n\nWhat would you like to note down today?";
 }
+// ==== MODALITÀ HITH ====
+
+const COACH_MODES = {
+  friend: "🧑‍🤝‍🧑 Amico",
+  spiritual: "✨ Guida spirituale",
+  goals: "🎯 Coach & Goal",
+};
+
+const MODE_PROMPTS = {
+  friend: "Sei l'Amico: caldo, semplice, empatico, 0 giudizio. Parli come qualcuno che ascolta davvero.",
+  spiritual: "Sei la Guida spirituale: parole calme, profonde, luminose. Evita religioni specifiche.",
+  goals: "Sei il Coach & Goal: concreto, pratico, chiaro. Sempre un piccolo passo finale.",
+};
+
+// Memoria in RAM (non ancora Supabase)
+let coachModeByUser = {};
+
+function coachModeKeyboard() {
+  return Markup.keyboard([
+    [COACH_MODES.friend],
+    [COACH_MODES.spiritual],
+    [COACH_MODES.goals],
+  ])
+    .oneTime()
+    .resize();
+}
+
+// Messaggio iniziale della scelta modalità
+function coachModeIntroText() {
+  return (
+    "Scegli la modalità con cui vuoi che HITH ti accompagni:\n\n" +
+    "🧑‍🤝‍🧑 Amico – empatico, semplice, accogliente\n" +
+    "✨ Guida spirituale – calma, luminosa, riflessiva\n" +
+    "🎯 Coach & Goal – concreta, orientata ai piccoli passi"
+  );
+}
 
 // salva / aggiorna utente
 async function ensureUser(ctx) {
@@ -267,12 +321,13 @@ async function askLLM(lang, history, userText, mode = DEFAULT_MODE) {
       Authorization: `Bearer ${OPENAI_API_KEY}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages,
-      temperature: 0.5,
-      max_tokens: 400,
-    }),
+   body: JSON.stringify({
+  model: "gpt-4o-mini",
+  messages,
+  temperature: 0.4,
+  max_tokens: 220,
+}),
+
   });
 
   if (!resp.ok) {
@@ -302,6 +357,20 @@ bot.start(async (ctx) => {
   await ctx.reply(startText(lang), mainKeyboard(lang));
 });
 // =============== TELEGRAM COACH MODES ===============
+bot.hears(COACH_MODES.friend, (ctx) => {
+  coachModeByUser[ctx.from.id] = "friend";
+  ctx.reply("Modalità impostata: 🧑‍🤝‍🧑 Amico.\n\nScrivi pure: ti ascolto.");
+});
+
+bot.hears(COACH_MODES.spiritual, (ctx) => {
+  coachModeByUser[ctx.from.id] = "spiritual";
+  ctx.reply("Modalità impostata: ✨ Guida spirituale.\n\nQuando vuoi, sono con te.");
+});
+
+bot.hears(COACH_MODES.goals, (ctx) => {
+  coachModeByUser[ctx.from.id] = "goals";
+  ctx.reply("Modalità impostata: 🎯 Coach & Goal.\n\nPronti per un piccolo passo?");
+});
 
 bot.action("mode_friend", async (ctx) => {
   const lang = detectLang(ctx);
@@ -344,12 +413,35 @@ bot.action("mode_goal", async (ctx) => {
     mainKeyboard(lang)
   );
 });
+bot.command("start", async (ctx) => {
+  coachModeByUser[ctx.from.id] = "friend"; // default
+  ctx.reply(
+    "Ciao 🌿 sono HITH — il tuo spazio gentile per diario, coaching e piccoli passi.\n\n" +
+      "Scegli la modalità:",
+    coachModeKeyboard()
+  );
+});
 
 // Tutti i testi
 bot.on("text", async (ctx) => {
-  const text = ctx.message.text?.trim() || "";
-  const tg_id = ctx.from.id;
-  const lang = detectLang(ctx);
+  const userId = ctx.from.id;
+
+  // se scrive "Coach", mostra le modalità
+  if (ctx.message.text === "📌 Coach") {
+    return ctx.reply(coachModeIntroText(), coachModeKeyboard());
+  }
+
+  const mode = coachModeByUser[userId] || "friend";
+  const systemPrompt = MODE_PROMPTS[mode];
+
+  const answer = await askLLM({
+    system: systemPrompt,
+    user: ctx.message.text,
+  });
+
+  ctx.reply(answer);
+});
+
 
   // /start viene già gestito sopra
   if (text.startsWith("/start")) return;
