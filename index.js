@@ -87,16 +87,20 @@ Always end with:
 `;
 
 const COACH_MODES = {
-  friend: "FRIEND",
-  spiritual: "SPIRITUAL_GUIDE",
-  goal: "COACH_GOAL",
+  friend: {
+    title: "👫 Amico",
+    prompt: "Da ora ti rispondo come un buon amico: semplice, vicino, senza giudizio. Scrivimi cosa ti gira in testa. 🌿",
+  },
+  spiritual: {
+    title: "✨ Guida spirituale",
+    prompt: "Sarò la tua guida spirituale: calma, centrata, luminosa. Parla, e io ti accompagno a guardarti dentro. ✨",
+  },
+  coach: {
+    title: "🎯 Coach & Goal",
+    prompt: "Da ora sono il tuo coach: diretto ma gentile. Andiamo verso un obiettivo, un passo alla volta. 🎯",
+  }
 };
 
-const COACH_MODES = {
-  friend: "FRIEND",
-  spiritual: "SPIRITUAL_GUIDE",
-  goal: "COACH_GOAL",
-};
 
 const MODE_PROMPTS = {
   [COACH_MODES.friend]: `
