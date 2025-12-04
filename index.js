@@ -54,8 +54,11 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
 const HITH_SYSTEM_PROMPT = `
 You are HITH: a gentle, encouraging companion for journaling, coaching and tiny steps.
 
+Goal:
+- feel like a WhatsApp chat with a close friend, not like a lesson or article.
+
 Tone:
-- warm, human, like a kind friend
+- warm, human, simple
 - never like a teacher, guru or therapist
 - no lectures, no long explanations
 
@@ -64,19 +67,30 @@ Language:
 - use plain, everyday words
 
 Style:
-- keep answers SHORT (max 5–7 lines of chat)
-- avoid numbered lists and bullet lists unless the user explicitly asks for "ideas" or "list"
-- if the user asks for ideas, give at most 3 short bullets, each max one short sentence
-- prefer 1–3 short paragraphs or a tiny checklist
+- max 2–3 short sentences
+- avoid numbered lists and bullet lists unless the user explicitly asks for "ideas" or a "list"
+- no headings, no bold titles
+- prefer chat-style replies (line breaks ok, but very short)
+- do not repeat the same idea in different words
+
+Rhythm:
+- usually ask at most ONE short follow-up question
+- if the user is already opening up, you can simply reflect + one gentle encouragement instead of another question.
 
 Boundaries:
 - no medical, financial or legal advice
-- when topics are heavy or clinical, gently suggest talking to a professional
+- when topics are heavy or clinical, gently suggest talking to a professional.
 
 Always end with:
-- either ONE gentle next step
-- or ONE short question to help the user reflect a bit more.
+- either one gentle next step
+- or one short question, never both.
 `;
+
+const COACH_MODES = {
+  friend: "FRIEND",
+  spiritual: "SPIRITUAL_GUIDE",
+  goal: "COACH_GOAL",
+};
 
 const COACH_MODES = {
   friend: "FRIEND",
@@ -86,35 +100,46 @@ const COACH_MODES = {
 
 const MODE_PROMPTS = {
   [COACH_MODES.friend]: `
-You are HITH in Friend Mode.
-Speak like a warm, calm friend who listens without pressure.
-Use simple, everyday words. Be human, gentle, supportive.
-Stay short and real. One helpful thought or question is enough.
-Never sound like a coach or teacher.
-End with a soft, friendly question or a tiny encouragement.
+You are HITH in Friend mode (🧑‍🤝‍🧑 Amico).
+Imagine you are chatting on WhatsApp with someone you care about.
+Be simple, close and relaxed. 
+Use 1–3 short sentences, like a voice in their pocket.
+Focus on listening and reflecting more than giving advice.
+You can use small emojis (🌿💚✨) but not every sentence.
+End with either a tiny encouragement or a very short, natural question (like a friend would ask).
 `,
 
   [COACH_MODES.spiritual]: `
-You are HITH in Spiritual Guide Mode.
-Speak slowly, softly, with a peaceful tone.
-Use light imagery (breath, presence, inner clarity) but never be mystical or exaggerated.
-Help the user feel grounded and centred.
-Keep your response short and calming.
-End with a reflective question or a mindful suggestion.
+You are HITH in Spiritual Guide mode (✨ Guida spirituale).
+Your words should feel like a calm pause in the day.
+Use very few words, 1–3 short sentences, with soft images (breath, light, space, roots).
+No preaching, no big theories.
+Gently invite the user to look inside or slow down.
+End with a soft question like "Cosa senti più forte adesso?" or a tiny mindful step.
 `,
 
   [COACH_MODES.goal]: `
-You are HITH in Coach & Goal Mode.
-Be clear, practical and motivating, but still gentle.
-Focus on small achievable steps and realistic goals.
-Ask clarifying questions if needed.
-Offer one simple next action, no long explanations.
-End with a concrete, realistic next step or a tiny challenge.
+You are HITH in Coach & Goal mode (🎯 Coach & Goal).
+Still sound like a friend on WhatsApp, not a strict coach.
+Use 2 short sentences:
+- first: acknowledge what the user said,
+- second: propose ONE realistic, tiny step or ask ONE focused question that moves things forward.
+Never give more than one step at a time.
+Do not list options unless the user specifically asks for "ideas".
+Keep everything small, doable and kind.
 `,
 };
-// modalità coach scelta per utente (solo in memoria, ok per test)
+
 const coachModeByUser = new Map();
 const DEFAULT_MODE = COACH_MODES.friend;
+// Modalità utente: "chat" (default) o "journal" (solo scrittura, nessuna risposta AI)
+const USER_MODES = {
+  chat: "chat",
+  journal: "journal",
+};
+
+// memoria in RAM per la modalità corrente di ogni utente
+const userModeById = new Map();
 
 
 
@@ -284,8 +309,11 @@ async function getRecentHistory(tg_id, limit = 8) {
       .from(SUPABASE_MESSAGES_TABLE)
       .select("role, content")
       .eq("tg_id", tg_id)
+      .in("role", ["user", "assistant"]) // <-- esclude "journal"
       .order("created_at", { ascending: false })
       .limit(limit);
+    ...
+
 
     if (error) {
       console.error("[getRecentHistory] Supabase error:", error.message);
@@ -321,12 +349,13 @@ async function askLLM(lang, history, userText, mode = DEFAULT_MODE) {
       Authorization: `Bearer ${OPENAI_API_KEY}`,
       "Content-Type": "application/json",
     },
-   body: JSON.stringify({
+ body: JSON.stringify({
   model: "gpt-4o-mini",
   messages,
   temperature: 0.4,
-  max_tokens: 220,
+  max_tokens: 160, // prima erano 400
 }),
+
 
   });
 
@@ -348,8 +377,38 @@ function tooSoon(id) {
   lastSeen.set(id, now);
   return false;
 }
+function journalIntroText(lang) {
+  if (lang === "it") {
+    return (
+      "📔 Modalità Journal aperta.\n\n" +
+      "Scrivi liberamente quello che senti o che vuoi ricordare.\n" +
+      "Io salvo in silenzio, senza interromperti.\n\n" +
+      "Quando vuoi tornare a parlare con me, tocca 📌 Coach, 📊 Progress oppure usa /start. 🌿"
+    );
+  }
+  if (lang === "de") {
+    return (
+      "📔 Journal-Modus geöffnet.\n\n" +
+      "Schreib frei, was du fühlst oder festhalten möchtest.\n" +
+      "Ich speichere still mit, ohne dich zu unterbrechen.\n\n" +
+      "Wenn du wieder mit mir reden möchtest, tippe auf 📌 Coach, 📊 Fortschritt oder /start. 🌿"
+    );
+  }
+  return (
+    "📔 Journal mode is open.\n\n" +
+    "Write freely whatever you feel or want to remember.\n" +
+    "I’ll quietly save it without interrupting you.\n\n" +
+    "When you want me to talk again, tap 📌 Coach, 📊 Progress or use /start. 🌿"
+  );
+}
 
 // =============== TELEGRAM HANDLERS ==============
+bot.start(async (ctx) => {
+  const lang = detectLang(ctx);
+  await ensureUser(ctx);
+  userModeById.set(ctx.from.id, USER_MODES.chat); // torna in modalità chat
+  await ctx.reply(startText(lang), mainKeyboard(lang));
+});
 
 bot.start(async (ctx) => {
   const lang = detectLang(ctx);
@@ -424,38 +483,49 @@ bot.command("start", async (ctx) => {
 
 // Tutti i testi
 bot.on("text", async (ctx) => {
-  const userId = ctx.from.id;
-
-  // se scrive "Coach", mostra le modalità
-  if (ctx.message.text === "📌 Coach") {
-    return ctx.reply(coachModeIntroText(), coachModeKeyboard());
-  }
-
-  const mode = coachModeByUser[userId] || "friend";
-  const systemPrompt = MODE_PROMPTS[mode];
-
-  const answer = await askLLM({
-    system: systemPrompt,
-    user: ctx.message.text,
-  });
-
-  ctx.reply(answer);
-});
-
+  const text = ctx.message.text?.trim() || "";
+  const tg_id = ctx.from.id;
+  const lang = detectLang(ctx);
 
   // /start viene già gestito sopra
   if (text.startsWith("/start")) return;
-  // Se l'utente preme il pulsante Coach, apri le 3 modalità
-  const plain = text.toLowerCase();
 
-  if (text === "📌 Coach" || plain === "coach" || plain === "coach & goal") {
+  // modalità corrente (di default "chat")
+  const currentMode = userModeById.get(tg_id) || USER_MODES.chat;
+
+  // 1) Se l'utente tocca "📔 Journal" → entra in modalità journal
+  if (text === "📔 Journal") {
+    userModeById.set(tg_id, USER_MODES.journal);
     await ensureUser(ctx);
-    await ctx.replyWithMarkdown(coachModeIntroText(lang), coachModeKeyboard(lang));
+    await ctx.reply(journalIntroText(lang), mainKeyboard(lang));
     return;
   }
 
+  // 2) Se l'utente tocca Coach / Progress / Settings → torniamo in "chat"
+  if (
+    text === "📌 Coach" ||
+    text === "📊 Progress" ||
+    text === "⚙️ Impostazioni" ||
+    text === "⚙️ Einstellungen" ||
+    text === "⚙️ Settings"
+  ) {
+    userModeById.set(tg_id, USER_MODES.chat);
+    // qui lasciamo che il resto dell'handler prosegua (risposta AI)
+  }
+
+  // 3) Se siamo in modalità JOURNAL:
+  //    - salviamo il testo
+  //    - NON applichiamo rate limit
+  //    - NON chiamiamo l'AI
+  if (userModeById.get(tg_id) === USER_MODES.journal) {
+    await ensureUser(ctx);
+    await saveMessage(tg_id, "journal", text); // ruolo diverso, così distinguiamo
+    return; // nessuna risposta del bot
+  }
+
+  // 4) Da qui in poi: modalità CHAT normale → usiamo rate limit + AI
   if (tooSoon(tg_id)) {
-    return; // silenzio: niente spam
+    return; // per evitare spam quando non è journal
   }
 
   await ensureUser(ctx);
@@ -480,6 +550,7 @@ bot.on("text", async (ctx) => {
     await ctx.reply(fallback, mainKeyboard(lang));
   }
 });
+
 
 // =============== WHATSAPP WEBHOOK ===============
 
