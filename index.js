@@ -229,6 +229,10 @@ async function askLLM(lang, history, userText) {
   const json = await resp.json();
   return json.choices?.[0]?.message?.content?.trim() || "Sono qui con te 💛";
 }
+If you invite the user to write or reflect, stop immediately after.
+Do not rephrase the invitation.
+Do not ask follow-up questions unless the user writes again.
+Silence is allowed.
 
 // rate limit 5s per utente
 const lastSeen = new Map();
