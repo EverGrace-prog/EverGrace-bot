@@ -1,5 +1,5 @@
 // index.js — HITH bot (Telegram Webhook) + Supabase + OpenAI + Journal WebApp
-// FIX: Memory ON by default, language mirrors user's language (auto + persistent), no emojis, menus open submenus.
+// Fix: no duplicate initBotIdentity, menus open submenus (no LLM), language mirrors user, memory ON, no emojis.
 
 import express from "express";
 import { Telegraf, Markup } from "telegraf";
@@ -35,9 +35,7 @@ if (!SUPABASE_URL || !SUPABASE_KEY) die("Missing SUPABASE_URL / SUPABASE_KEY");
 if (!RAW_PUBLIC_URL) die("Missing PUBLIC_URL (or WEBHOOK_DOMAIN)");
 
 const PUBLIC_URL = RAW_PUBLIC_URL.trim().replace(/\/+$/, "");
-if (!/^https:\/\//i.test(PUBLIC_URL)) {
-  die(`PUBLIC_URL must start with https:// (got "${PUBLIC_URL}")`);
-}
+if (!/^https:\/\//i.test(PUBLIC_URL)) die(`PUBLIC_URL must start with https:// (got "${PUBLIC_URL}")`);
 
 // ================= CLIENTS =================
 const app = express();
@@ -55,10 +53,10 @@ let BOT_USERNAME = process.env.BOT_USERNAME || "";
 // ================= DEFAULT PREFS (Memory ON) =================
 const DEFAULT_PREFS = {
   memory_on: true,
-  lang: "en",              // default until detected / selected
-  no_emojis: true,         // locked true
-  no_questions: true,
-  no_next_steps: true,
+  lang: "en",
+  no_emojis: true,     // locked true
+  no_questions: true,  // reduces nag
+  no_next_steps: true, // removes “next step” coaching nag
   max_reply_chars: 360,
 };
 
@@ -87,25 +85,21 @@ function mainKeyboard(lang) {
 }
 
 function startText(lang) {
-  if (lang === "it") return "Ciao. Sono HITH.\nScrivimi come a un’amica.";
-  if (lang === "de") return "Hi. Ich bin HITH.\nSchreib mir wie einer Freundin.";
-  return "Hi. I’m HITH.\nTalk to me like a friend.";
+  if (lang === "it") return "Ciao. Sono HITH.";
+  if (lang === "de") return "Hi. Ich bin HITH.";
+  return "Hi. I’m HITH.";
 }
 
 // ================= LANGUAGE DETECTION =================
-// Lightweight heuristic (no extra libs). Also: user can explicitly set language via settings buttons.
 function detectLangFromText(text = "") {
   const t = text.trim();
 
-  // German hints
   if (/[äöüßÄÖÜ]/.test(t)) return "de";
-  if (/\b(und|nicht|doch|ich|du|wir|ihr|sie|bitte|danke|genau|heute)\b/i.test(t)) return "de";
+  if (/\b(und|nicht|doch|ich|du|wir|ihr|sie|bitte|danke|heute)\b/i.test(t)) return "de";
 
-  // Italian hints
   if (/[àèéìòùÀÈÉÌÒÙ]/.test(t)) return "it";
-  if (/\b(che|non|perché|oggi|bene|grazie|ciao|come|stai|allora|voglio|hai|sono)\b/i.test(t)) return "it";
+  if (/\b(che|non|perché|oggi|bene|grazie|ciao|come|stai|voglio|sono)\b/i.test(t)) return "it";
 
-  // English default
   return "en";
 }
 
@@ -124,18 +118,13 @@ function menuKey(text = "") {
 
 // ================= MODES =================
 const userMode = new Map(); // tg_id -> friend/coach/sos
-function setMode(tg_id, mode) {
-  userMode.set(tg_id, mode);
-}
-function getMode(tg_id) {
-  return userMode.get(tg_id) || "friend";
-}
+function setMode(tg_id, mode) { userMode.set(tg_id, mode); }
+function getMode(tg_id) { return userMode.get(tg_id) || "friend"; }
 
-// ================= MEMORY (PREFS) =================
-async function ensureUser(ctx, langToStore) {
+// ================= PREFS =================
+async function ensureUser(ctx, lang) {
   const tg_id = ctx.from.id;
   const first_name = ctx.from.first_name || "";
-  const lang = langToStore || "en";
 
   try {
     const { data, error } = await supabase
@@ -178,22 +167,14 @@ async function loadPrefs(tg_id) {
       return row;
     }
 
-    // Enforce locked no_emojis + memory_on
-    const merged = {
-      ...DEFAULT_PREFS,
-      ...data,
-      memory_on: true,
-      no_emojis: true,
-    };
-
-    const needsFix = data.memory_on !== true || data.no_emojis !== true;
-    if (needsFix) {
+    // enforce locked values
+    const merged = { ...DEFAULT_PREFS, ...data, memory_on: true, no_emojis: true };
+    if (data.memory_on !== true || data.no_emojis !== true) {
       await supabase
         .from(SUPABASE_PREFS_TABLE)
         .update({ memory_on: true, no_emojis: true })
         .eq("tg_id", tg_id);
     }
-
     return merged;
   } catch (err) {
     console.error("[loadPrefs]", err?.message || err);
@@ -207,44 +188,6 @@ async function setPrefsLang(tg_id, lang) {
   } catch (err) {
     console.error("[setPrefsLang]", err?.message || err);
   }
-}
-
-// Minimal learning: only clear preference triggers
-async function updatePrefsFromText(tg_id, text, prefs) {
-  if (!prefs?.memory_on) return prefs;
-  const t = (text || "").toLowerCase();
-  const next = { ...prefs };
-
-  if (t.includes("no questions") || t.includes("non farmi domande")) next.no_questions = true;
-  if (t.includes("you can ask") || t.includes("puoi fare domande")) next.no_questions = false;
-
-  if (t.includes("short replies") || t.includes("risposte corte") || t.includes("più corto")) next.max_reply_chars = 240;
-  if (t.includes("longer") || t.includes("più lungo") || t.includes("spiega meglio")) next.max_reply_chars = 520;
-
-  if (t.includes("no advice") || t.includes("non darmi consigli") || t.includes("niente next steps")) next.no_next_steps = true;
-  if (t.includes("give me advice") || t.includes("dammi un consiglio") || t.includes("cosa devo fare")) next.no_next_steps = false;
-
-  const changed =
-    next.no_questions !== prefs.no_questions ||
-    next.no_next_steps !== prefs.no_next_steps ||
-    next.max_reply_chars !== prefs.max_reply_chars;
-
-  if (!changed) return prefs;
-
-  try {
-    await supabase
-      .from(SUPABASE_PREFS_TABLE)
-      .update({
-        no_questions: next.no_questions,
-        no_next_steps: next.no_next_steps,
-        max_reply_chars: next.max_reply_chars,
-      })
-      .eq("tg_id", tg_id);
-  } catch (err) {
-    console.error("[updatePrefsFromText]", err?.message || err);
-  }
-
-  return next;
 }
 
 // ================= HISTORY =================
@@ -283,28 +226,14 @@ function removeQuestions(text = "") {
 }
 function removeNextSteps(text = "", lang = "en") {
   let t = text;
-
-  // Common “naggy” closers across languages
   const patterns = [
-    /(un passo utile potrebbe|prova a|ti consiglio di|se vuoi|potresti)/gim, // it
-    /(ein schritt|du könntest|wenn du willst|versuch mal)/gim,              // de
-    /(a next step|you could|try to|if you want)/gim,                        // en
+    /(un passo utile potrebbe|prova a|ti consiglio di|potresti|se vuoi)/gim,
+    /(ein schritt|du könntest|wenn du willst|versuch mal)/gim,
+    /(a next step|you could|try to|if you want)/gim,
   ];
-
   for (const p of patterns) t = t.replace(p, "").trim();
-
-  // also remove trailing lines that look like “next step”
-  const lines = t.split("\n").filter((line) => {
-    const l = line.toLowerCase();
-    if (lang === "it" && (l.includes("un passo") || l.startsWith("prova "))) return false;
-    if (lang === "de" && (l.includes("ein schritt") || l.startsWith("versuch"))) return false;
-    if (lang === "en" && (l.includes("next step") || l.startsWith("try "))) return false;
-    return true;
-  });
-
-  return lines.join("\n").trim();
+  return t;
 }
-
 function enforcePrefs(answer, prefs, lang) {
   let out = (answer || "").trim();
   if (prefs?.no_emojis) out = stripEmojis(out);
@@ -323,29 +252,21 @@ function systemPrompt(mode, lang) {
   if (mode === "coach") {
     return `
 You are HITH. Your name is HITH.
-Mode: COACH. Be practical, concise, no therapy tone.
-Ask at most ONE question, only if needed.
-No emojis.
+Mode: COACH. Be practical and short. No therapy tone. No emojis.
 Reply in ${lang}.
 `.trim();
   }
   if (mode === "sos") {
     return `
 You are HITH. Your name is HITH.
-Mode: SOS. 1–4 short lines, grounding, no diagnosis, no therapy tone.
-No emojis.
+Mode: SOS. 1–4 short lines. No diagnosis. No therapy tone. No emojis.
 Reply in ${lang}.
 `.trim();
   }
   return `
 You are HITH. Your name is HITH.
 You are a calm friend, not a therapist.
-
-STYLE:
-- Very short and natural (1–2 sentences).
-- No lectures. No "next steps". No exercises.
-- Do NOT ask questions unless the user asked a question first.
-- No emojis.
+STYLE: 1–2 natural sentences. No lectures. No exercises. No emojis.
 Reply in ${lang}.
 `.trim();
 }
@@ -355,7 +276,7 @@ async function fetchWithTimeout(url, options = {}, ms = 25000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), ms);
   try {
-    return await fetch(url, { ...options, signal: controller.signal });
+    return await fetch(url, { ...options, signal: controller.signal }); // Node 18+ has fetch
   } finally {
     clearTimeout(id);
   }
@@ -393,25 +314,25 @@ async function askLLM(lang, mode, history, userText) {
 
 // ================= SUBMENUS =================
 function journalMenu(lang) {
-  const open = lang === "it" ? "Open Journal" : lang === "de" ? "Journal öffnen" : "Open Journal";
-  const recent = lang === "it" ? "Recent saves" : lang === "de" ? "Letzte Einträge" : "Recent saves";
+  const open = lang === "it" ? "Apri Journal" : lang === "de" ? "Journal öffnen" : "Open Journal";
+  const recent = lang === "it" ? "Ultimi salvataggi" : lang === "de" ? "Letzte Einträge" : "Recent saves";
   return Markup.inlineKeyboard([
     [Markup.button.webApp(open, `${PUBLIC_URL}/journal`)],
     [Markup.button.callback(recent, "JOURNAL_RECENT")],
   ]);
 }
 function progressMenu(lang) {
-  const w = lang === "it" ? "Week" : lang === "de" ? "Woche" : "Week";
-  const m = lang === "it" ? "Month" : lang === "de" ? "Monat" : "Month";
+  const w = lang === "it" ? "Settimana" : lang === "de" ? "Woche" : "Week";
+  const m = lang === "it" ? "Mese" : lang === "de" ? "Monat" : "Month";
   return Markup.inlineKeyboard([
     [Markup.button.callback(w, "PROGRESS_WEEK")],
     [Markup.button.callback(m, "PROGRESS_MONTH")],
   ]);
 }
 function coachMenu(lang) {
-  const g = lang === "it" ? "Goal" : lang === "de" ? "Ziel" : "Goal";
-  const p = lang === "it" ? "Plan" : lang === "de" ? "Plan" : "Plan";
-  const stop = lang === "it" ? "Stop coach" : lang === "de" ? "Stop Coach" : "Stop coach";
+  const g = lang === "it" ? "Obiettivo" : lang === "de" ? "Ziel" : "Goal";
+  const p = lang === "it" ? "Piano" : lang === "de" ? "Plan" : "Plan";
+  const stop = lang === "it" ? "Stop Coach" : lang === "de" ? "Stop Coach" : "Stop Coach";
   return Markup.inlineKeyboard([
     [Markup.button.callback(g, "COACH_GOAL")],
     [Markup.button.callback(p, "COACH_PLAN")],
@@ -419,27 +340,25 @@ function coachMenu(lang) {
   ]);
 }
 function sosMenu(lang) {
-  const b = lang === "it" ? "Breath 30s" : lang === "de" ? "Atem 30s" : "Breath 30s";
-  const r = lang === "it" ? "Reset" : "de" ? "Reset" : "Reset";
-  const stop = lang === "it" ? "Stop SOS" : lang === "de" ? "Stop SOS" : "Stop SOS";
+  const b = lang === "it" ? "Respiro 30s" : lang === "de" ? "Atem 30s" : "Breath 30s";
+  const r = lang === "it" ? "Reset" : "Reset";
+  const stop = lang === "it" ? "Stop SOS" : "Stop SOS";
   return Markup.inlineKeyboard([
     [Markup.button.callback(b, "SOS_BREATH")],
     [Markup.button.callback(r, "SOS_RESET")],
     [Markup.button.callback(stop, "MODE_FRIEND")],
   ]);
 }
-function settingsMenu(lang) {
-  const friend = lang === "it" ? "Friend mode" : lang === "de" ? "Freund-Modus" : "Friend mode";
+function settingsMenu() {
   return Markup.inlineKeyboard([
     [
       Markup.button.callback("IT", "LANG_IT"),
       Markup.button.callback("EN", "LANG_EN"),
       Markup.button.callback("DE", "LANG_DE"),
     ],
-    [Markup.button.callback(friend, "MODE_FRIEND")],
+    [Markup.button.callback("Friend mode", "MODE_FRIEND")],
   ]);
 }
-
 async function inviteText(lang) {
   const link = BOT_USERNAME ? `https://t.me/${BOT_USERNAME}` : "https://t.me/";
   if (lang === "it") return `Invita un’amica:\n${link}`;
@@ -447,23 +366,11 @@ async function inviteText(lang) {
   return `Invite a friend:\n${link}`;
 }
 
-// ================= BOT IDENTITY =================
-async function initBotIdentity() {
-  try {
-    const me = await bot.telegram.getMe();
-    BOT_USERNAME = me.username || BOT_USERNAME || "";
-    console.log("🤖 Bot username:", BOT_USERNAME);
-  } catch (e) {
-    console.log("⚠️ Cannot get bot username:", e?.message || e);
-  }
-}
-
 // ================= TELEGRAM HANDLERS =================
 bot.start(async (ctx) => {
   const tg_id = ctx.from.id;
   let prefs = await loadPrefs(tg_id);
 
-  // Start language: use stored pref (or Telegram user setting if present) as initial
   const initialLang = prefs.lang || (ctx.from?.language_code || "en").slice(0, 2);
   prefs.lang = ["it", "en", "de"].includes(initialLang) ? initialLang : "en";
   await setPrefsLang(tg_id, prefs.lang);
@@ -474,7 +381,6 @@ bot.start(async (ctx) => {
   await ctx.reply(startText(prefs.lang), mainKeyboard(prefs.lang));
 });
 
-// All text messages
 bot.on("text", async (ctx) => {
   const raw = ctx.message.text?.trim() || "";
   const k = menuKey(raw);
@@ -482,14 +388,9 @@ bot.on("text", async (ctx) => {
 
   let prefs = await loadPrefs(tg_id);
 
-  // Decide language for THIS message:
-  // 1) If user selected a pref language -> use it.
-  // 2) Otherwise, detect from text and persist it (so it "learns" your language).
-  let lang = prefs.lang;
+  // Language for THIS message: detect from user text; persist if different
   const detected = detectLangFromText(raw);
-  if (!lang) lang = detected;
-
-  // If user is clearly writing in another language, switch + persist
+  let lang = prefs.lang || detected || "en";
   if (detected && detected !== lang) {
     lang = detected;
     await setPrefsLang(tg_id, lang);
@@ -498,46 +399,21 @@ bot.on("text", async (ctx) => {
 
   await ensureUser(ctx, lang);
 
-  // MENU: never call OpenAI here
-  if (k === "journal") {
-    setMode(tg_id, "friend");
-    await ctx.reply(MENU.JOURNAL, journalMenu(lang));
-    return;
-  }
-  if (k === "progress" || k === "fortschritt") {
-    setMode(tg_id, "friend");
-    await ctx.reply("Progress", progressMenu(lang));
-    return;
-  }
-  if (k === "coach") {
-    setMode(tg_id, "coach");
-    await ctx.reply("Coach", coachMenu(lang));
-    return;
-  }
-  if (k === "sos") {
-    setMode(tg_id, "sos");
-    await ctx.reply("SOS", sosMenu(lang));
-    return;
-  }
-  if (k === "invite" || k === "einladen") {
-    setMode(tg_id, "friend");
-    await ctx.reply(await inviteText(lang), mainKeyboard(lang));
-    return;
-  }
-  if (k === "impostazioni" || k === "settings" || k === "einstellungen") {
-    setMode(tg_id, "friend");
-    await ctx.reply(lang === "it" ? "Impostazioni" : lang === "de" ? "Einstellungen" : "Settings", settingsMenu(lang));
-    return;
-  }
+  // MENU: never call OpenAI
+  if (k === "journal") { setMode(tg_id, "friend"); await ctx.reply("Journal", journalMenu(lang)); return; }
+  if (k === "progress" || k === "fortschritt") { setMode(tg_id, "friend"); await ctx.reply("Progress", progressMenu(lang)); return; }
+  if (k === "coach") { setMode(tg_id, "coach"); await ctx.reply("Coach", coachMenu(lang)); return; }
+  if (k === "sos") { setMode(tg_id, "sos"); await ctx.reply("SOS", sosMenu(lang)); return; }
+  if (k === "invite" || k === "einladen") { setMode(tg_id, "friend"); await ctx.reply(await inviteText(lang), mainKeyboard(lang)); return; }
+  if (k === "impostazioni" || k === "settings" || k === "einstellungen") { setMode(tg_id, "friend"); await ctx.reply("Settings", settingsMenu()); return; }
 
-  // Identity: HITH
+  // Name: HITH
   const lower = raw.toLowerCase();
   if (
-    lower.includes("come ti chiami") ||
-    lower.includes("qual è il tuo nome") ||
-    lower.includes("chi sei") ||
     lower.includes("your name") ||
     lower.includes("who are you") ||
+    lower.includes("come ti chiami") ||
+    lower.includes("chi sei") ||
     lower.includes("wie heißt du")
   ) {
     const msg = lang === "it" ? "Mi chiamo HITH." : lang === "de" ? "Ich heiße HITH." : "My name is HITH.";
@@ -545,20 +421,7 @@ bot.on("text", async (ctx) => {
     return;
   }
 
-  // Learn preferences from explicit text
-  prefs = await updatePrefsFromText(tg_id, raw, prefs);
-
   await saveMessage(tg_id, "user", raw);
-
-  // Minimal acknowledgement for very small messages
-  const small = raw.trim().toLowerCase();
-  if (["ok", "okay", "grazie", "thanks", "va bene", "perfetto", "good"].includes(small)) {
-    const msg = lang === "it" ? "Sono qui." : lang === "de" ? "Ich bin da." : "I’m here.";
-    const out = enforcePrefs(msg, prefs, lang);
-    await saveMessage(tg_id, "assistant", out);
-    await ctx.reply(out, mainKeyboard(lang));
-    return;
-  }
 
   const mode = getMode(tg_id);
 
@@ -578,23 +441,16 @@ bot.on("text", async (ctx) => {
   }
 });
 
-// Inline callback menus
+// callbacks
 bot.on("callback_query", async (ctx) => {
   const tg_id = ctx.from.id;
   const data = ctx.callbackQuery?.data || "";
   let prefs = await loadPrefs(tg_id);
   const lang = prefs.lang || "en";
 
-  try {
-    await ctx.answerCbQuery();
-  } catch {}
+  try { await ctx.answerCbQuery(); } catch {}
 
-  if (data === "MODE_FRIEND") {
-    setMode(tg_id, "friend");
-    const msg = lang === "it" ? "Ok." : lang === "de" ? "Okay." : "Ok.";
-    await ctx.reply(enforcePrefs(msg, prefs, lang), mainKeyboard(lang));
-    return;
-  }
+  if (data === "MODE_FRIEND") { setMode(tg_id, "friend"); await ctx.reply(enforcePrefs("Ok.", prefs, lang)); return; }
 
   if (data === "LANG_IT" || data === "LANG_EN" || data === "LANG_DE") {
     const newLang = data === "LANG_IT" ? "it" : data === "LANG_DE" ? "de" : "en";
@@ -621,7 +477,9 @@ bot.on("callback_query", async (ctx) => {
       }
 
       const lines = rows.map((r) => {
-        const d = new Date(r.created_at).toLocaleString(lang === "it" ? "it-IT" : lang === "de" ? "de-DE" : "en-US");
+        const d = new Date(r.created_at).toLocaleString(
+          lang === "it" ? "it-IT" : lang === "de" ? "de-DE" : "en-US"
+        );
         return `- ${(r.title || "Untitled")} (${d})`;
       });
 
@@ -634,8 +492,7 @@ bot.on("callback_query", async (ctx) => {
   }
 
   if (data === "PROGRESS_WEEK" || data === "PROGRESS_MONTH") {
-    const msg =
-      lang === "it" ? "Progress in arrivo." : lang === "de" ? "Fortschritt kommt bald." : "Progress coming soon.";
+    const msg = lang === "it" ? "Progress in arrivo." : lang === "de" ? "Fortschritt kommt bald." : "Progress coming soon.";
     await ctx.reply(enforcePrefs(msg, prefs, lang));
     return;
   }
@@ -664,16 +521,14 @@ bot.on("callback_query", async (ctx) => {
 
   if (data === "COACH_GOAL") {
     setMode(tg_id, "coach");
-    const msg =
-      lang === "it" ? "Dimmi l’obiettivo in una frase." : lang === "de" ? "Sag mir dein Ziel in einem Satz." : "Tell me your goal in one sentence.";
+    const msg = lang === "it" ? "Scrivi l’obiettivo in una frase." : lang === "de" ? "Sag dein Ziel in einem Satz." : "Write your goal in one sentence.";
     await ctx.reply(enforcePrefs(msg, prefs, lang));
     return;
   }
 
   if (data === "COACH_PLAN") {
     setMode(tg_id, "coach");
-    const msg =
-      lang === "it" ? "Cosa vuoi ottenere entro 7 giorni?" : lang === "de" ? "Was willst du in 7 Tagen schaffen?" : "What do you want to achieve in 7 days?";
+    const msg = lang === "it" ? "Cosa vuoi ottenere in 7 giorni." : lang === "de" ? "Was willst du in 7 Tagen schaffen." : "What do you want in 7 days.";
     await ctx.reply(enforcePrefs(msg, prefs, lang));
     return;
   }
@@ -832,31 +687,20 @@ app.get("/journal", (_req, res) => {
 const SECRET_PATH = "/tg-webhook";
 const WEBHOOK_URL = `${PUBLIC_URL}${SECRET_PATH}`;
 
-app.post(SECRET_PATH, async (req, res) => {
-  try {
-    await bot.handleUpdate(req.body, res);
-  } catch (err) {
-    console.error("[tg webhook]", err?.message || err);
-    res.sendStatus(200);
-  }
-});
+// Telegraf webhook callback (clean & reliable)
+app.use(SECRET_PATH, bot.webhookCallback(SECRET_PATH));
 
 async function setupTelegramWebhook() {
   try {
-    await fetch(
-      `https://api.telegram.org/bot${BOT_TOKEN}/deleteWebhook?drop_pending_updates=true`
-    );
-    const resp = await fetch(
-      `https://api.telegram.org/bot${BOT_TOKEN}/setWebhook`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          url: WEBHOOK_URL,
-          allowed_updates: ["message", "callback_query"],
-        }),
-      }
-    );
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/deleteWebhook?drop_pending_updates=true`);
+    const resp = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setWebhook`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        url: WEBHOOK_URL,
+        allowed_updates: ["message", "callback_query"],
+      }),
+    });
     console.log("[setWebhook]", await resp.json());
   } catch (err) {
     console.error("[setWebhook] failed:", err?.message || err);
@@ -866,7 +710,7 @@ async function setupTelegramWebhook() {
 // ================= BASE ROUTE =================
 app.get("/", (_req, res) => res.status(200).send("HITH bot is running."));
 
-// ================= BOOT =================
+// ================= BOT IDENTITY (ONLY ONCE) =================
 async function initBotIdentity() {
   try {
     const me = await bot.telegram.getMe();
@@ -877,10 +721,12 @@ async function initBotIdentity() {
   }
 }
 
+// ================= BOOT =================
 const server = app.listen(PORT, async () => {
   console.log(`🚀 Server listening on ${PORT}`);
   console.log(`🌍 PUBLIC_URL: ${PUBLIC_URL}`);
   console.log(`🤖 Telegram webhook: ${WEBHOOK_URL}`);
+
   await initBotIdentity();
   await setupTelegramWebhook();
 });
