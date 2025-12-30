@@ -688,7 +688,8 @@ const SECRET_PATH = "/tg-webhook";
 const WEBHOOK_URL = `${PUBLIC_URL}${SECRET_PATH}`;
 
 // Telegraf webhook callback (clean & reliable)
-app.use(SECRET_PATH, bot.webhookCallback(SECRET_PATH));
+app.use(bot.webhookCallback(SECRET_PATH));
+
 
 async function setupTelegramWebhook() {
   try {
