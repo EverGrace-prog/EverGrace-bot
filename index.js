@@ -566,7 +566,6 @@ bot.on("text", async (ctx) => {
     await ctx.reply(lang === "it" ? "Ok. Riproviamo." : "Ok. Try again.", mainKeyboard(lang));
   }
 });
-
 // ================== WHATSAPP WEBHOOK ==================
 
 // Verify (GET)
@@ -662,6 +661,7 @@ app.post("/whatsapp/webhook", async (req, res) => {
     console.error("❌ WhatsApp webhook error:", err?.message || err);
   }
 });
+
 // ================== TELEGRAM WEBHOOK ==================
 const SECRET_PATH = "/tg-webhook";
 const WEBHOOK_URL = `${PUBLIC_URL}${SECRET_PATH}`;
