@@ -1,821 +1,744 @@
-// index.js — HITH bot (Telegram + WhatsApp) + Supabase + OpenAI + Journal WebApp
-// ✅ Telegram: webhook ok, menu non chiama AI, lock friend mode.
-// ✅ WhatsApp: webhook verify + messages -> stessa pipeline HITH (lang mirror, emoji mirror light, no therapy nag), history + prefs in Supabase.
+"use strict";
 
-import express from "express";
-import { Telegraf, Markup } from "telegraf";
-import { createClient } from "@supabase/supabase-js";
+/**
+ * HITH — Telegram + WhatsApp (single server)
+ * - Telegram: Telegraf webhook at /tg-webhook
+ * - WhatsApp Cloud API: webhook at /whatsapp/webhook (GET verify + POST updates)
+ * - Journal web page: /journal (write/save/share/print)
+ */
 
-// ================== ENV ==================
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const express = require("express");
+const crypto = require("crypto");
+const { Telegraf, Markup } = require("telegraf");
+const { createClient } = require("@supabase/supabase-js");
 
-const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_KEY =
-  process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_KEY;
-
-const SUPABASE_USERS_TABLE =
-  process.env.SUPABASE_USERS_TABLE || process.env.SUPABASE_TABLE || "users";
-const SUPABASE_MESSAGES_TABLE =
-  process.env.SUPABASE_MESSAGES_TABLE || "messages";
-
-const SUPABASE_PREFS_TABLE = process.env.SUPABASE_PREFS_TABLE || "hith_prefs";
-const SUPABASE_JOURNAL_TABLE =
-  process.env.SUPABASE_JOURNAL_TABLE || "hith_journals";
-
-// WhatsApp tables (NEW)
-const SUPABASE_WA_PREFS_TABLE =
-  process.env.SUPABASE_WA_PREFS_TABLE || "hith_wa_prefs";
-const SUPABASE_WA_MESSAGES_TABLE =
-  process.env.SUPABASE_WA_MESSAGES_TABLE || "hith_wa_messages";
-
-// PUBLIC_URL (Render) or WEBHOOK_DOMAIN
-const RAW_PUBLIC_URL =
-  process.env.PUBLIC_URL || process.env.WEBHOOK_DOMAIN || "";
-
-// WhatsApp (Meta Cloud API)
-const WHATSAPP_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN; // must match Meta webhook verify token
-const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN; // permanent token / system user token
-const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID; // phone number ID (not phone number)
-
-const PORT = Number(process.env.PORT) || 10000;
-
-// --- Critical env checks ---
-function die(msg) {
-  console.error("❌ " + msg);
-  process.exit(1);
-}
-if (!BOT_TOKEN) die("Missing BOT_TOKEN");
-if (!OPENAI_API_KEY) die("Missing OPENAI_API_KEY");
-if (!SUPABASE_URL || !SUPABASE_KEY) die("Missing Supabase config: SUPABASE_URL / SUPABASE_KEY");
-if (!RAW_PUBLIC_URL) die("Missing PUBLIC_URL (or WEBHOOK_DOMAIN).");
-
-const PUBLIC_URL = RAW_PUBLIC_URL.trim().replace(/\/+$/, "");
-console.log("PUBLIC_URL:", PUBLIC_URL);
-
-// ================== CLIENTS ==================
 const app = express();
-app.set("trust proxy", 1);
 app.use(express.json({ limit: "2mb" }));
 
-const bot = new Telegraf(BOT_TOKEN);
+// -------------------- ENV --------------------
+const PORT = process.env.PORT || 10000;
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
-  auth: { persistSession: false },
-});
+// Base URL of THIS Render service (ONE public URL for both Telegram + WhatsApp)
+const PUBLIC_URL = (process.env.PUBLIC_URL || "").replace(/\/$/, "");
 
-// ================== LANGUAGE (mirror user message) ==================
-function detectLangFromText(text = "") {
-  const t = (text || "").trim();
-  if (!t) return null;
-  const lower = " " + t.toLowerCase() + " ";
+// Telegram
+const BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
 
-  // simple hints
-  const itHints = [" che ", " non ", " perché", " perche", " come ", " oggi", " grazie", " ciao", " voglio ", " allora "];
-  const deHints = [" ich ", " nicht", " danke", " hallo", " wie ", " heute", " und ", " bitte", " kannst", " wirklich"];
-  const enHints = [" i ", " you ", " thanks", " hello", " what ", " how ", " today", " really", " can you", " do you"];
+// OpenAI
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini"; // change if you want
 
-  const score = (hints) => hints.reduce((acc, h) => acc + (lower.includes(h) ? 1 : 0), 0);
-  const it = score(itHints), de = score(deHints), en = score(enHints);
+// Supabase
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE =
+  process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_KEY;
 
-  const max = Math.max(it, de, en);
-  if (max === 0) return null;
-  if (max === it) return "it";
-  if (max === de) return "de";
-  return "en";
+// WhatsApp
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN; // permanent token
+const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID; // phone number ID
+const WHATSAPP_VERIFY_TOKEN =
+  process.env.WHATSAPP_VERIFY_TOKEN || "hith_whatsapp_verify";
+
+// -------------------- SAFETY CHECKS --------------------
+function required(name, value) {
+  if (!value) console.warn(`⚠️ Missing env: ${name}`);
 }
 
-function detectLangTelegram(ctx, userText = "") {
-  const byText = detectLangFromText(userText);
-  if (byText) return byText;
+required("PUBLIC_URL", PUBLIC_URL);
+required("BOT_TOKEN (or TELEGRAM_BOT_TOKEN)", BOT_TOKEN);
+required("OPENAI_API_KEY", OPENAI_API_KEY);
+required("SUPABASE_URL", SUPABASE_URL);
+required("SUPABASE_SERVICE_ROLE (or SUPABASE_KEY)", SUPABASE_SERVICE_ROLE);
+// WhatsApp envs can be added later, but routes must exist for verification:
+required("WHATSAPP_VERIFY_TOKEN", WHATSAPP_VERIFY_TOKEN);
 
-  const code = (ctx.from?.language_code || "en").slice(0, 2);
-  if (["en", "it", "de"].includes(code)) return code;
-  return "en";
+// -------------------- SUPABASE --------------------
+const supabase =
+  SUPABASE_URL && SUPABASE_SERVICE_ROLE
+    ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE, {
+        auth: { persistSession: false },
+      })
+    : null;
+
+// Minimal fallback in-memory store (if Supabase is missing)
+const mem = {
+  prefs: new Map(), // key: "tg:123" or "wa:+39123"
+  journal: new Map(), // key -> array of entries
+};
+
+// -------------------- UTILS --------------------
+const HITH_NAME = "Hith";
+
+function nowIso() {
+  return new Date().toISOString();
 }
 
-function isEmojiRecent(text = "") {
-  return /([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|\uD83E[\uDC00-\uDFFF])/g.test(text || "");
+function keyFor(channel, id) {
+  return `${channel}:${id}`;
 }
 
-// ================== TELEGRAM UI ==================
-function mainKeyboard(lang) {
-  if (lang === "it") {
-    return Markup.keyboard([
-      [Markup.button.text("📔 Journal"), Markup.button.text("📊 Progress")],
-      [Markup.button.text("📌 Coach"), Markup.button.text("⚡ SOS")],
-      [Markup.button.text("🔗 Invite"), Markup.button.text("⚙️ Impostazioni")],
-    ]).resize();
+function safeText(x) {
+  return String(x || "").trim();
+}
+
+function shortId() {
+  return crypto.randomBytes(6).toString("hex");
+}
+
+// light emoji usage
+function addEmoji(lang, text) {
+  // tasteful: only add when it helps the tone
+  if (!text) return text;
+  // If it already contains emoji, don’t add more.
+  if (/[^\u0000-\u007F]/.test(text)) return text;
+  const tail = lang === "IT" ? " 🙂" : lang === "DE" ? " 🙂" : " 🙂";
+  return text + tail;
+}
+
+// quick language guess if user didn’t set one
+function guessLangFromText(t) {
+  const s = (t || "").toLowerCase();
+  const hasDe =
+    /\b(und|nicht|ich|du|wir|danke|bitte|heute|machen)\b/.test(s) ||
+    /[äöüß]/.test(s);
+  const hasIt =
+    /\b(che|non|sono|grazie|oggi|come|perché|bene|ciao)\b/.test(s);
+  if (hasDe && !hasIt) return "DE";
+  if (hasIt && !hasDe) return "IT";
+  return "EN";
+}
+
+// -------------------- PREFS (Friend mode locked) --------------------
+const DEFAULT_PREFS = {
+  lang: "EN",
+  friend_mode: true, // LOCKED ON
+  friend_mode_locked: true,
+};
+
+async function getPrefs(channel, userId) {
+  const k = keyFor(channel, userId);
+
+  if (!supabase) {
+    return mem.prefs.get(k) || { ...DEFAULT_PREFS };
   }
-  if (lang === "de") {
-    return Markup.keyboard([
-      [Markup.button.text("📔 Journal"), Markup.button.text("📊 Fortschritt")],
-      [Markup.button.text("📌 Coach"), Markup.button.text("⚡ SOS")],
-      [Markup.button.text("🔗 Einladen"), Markup.button.text("⚙️ Einstellungen")],
-    ]).resize();
+
+  const { data, error } = await supabase
+    .from("hith_prefs")
+    .select("*")
+    .eq("user_key", k)
+    .maybeSingle();
+
+  if (error) {
+    console.warn("Supabase getPrefs error:", error.message);
+    return mem.prefs.get(k) || { ...DEFAULT_PREFS };
   }
-  return Markup.keyboard([
-    [Markup.button.text("📔 Journal"), Markup.button.text("📊 Progress")],
-    [Markup.button.text("📌 Coach"), Markup.button.text("⚡ SOS")],
-    [Markup.button.text("🔗 Invite"), Markup.button.text("⚙️ Settings")],
-  ]).resize();
-}
 
-function startText(lang) {
-  if (lang === "it") return "Ciao. Sono HITH.";
-  if (lang === "de") return "Hi. Ich bin HITH.";
-  return "Hi. I’m HITH.";
-}
-
-// ================== SUPABASE HELPERS ==================
-async function ensureUserTelegram(ctx, langOverride = null) {
-  const tg_id = ctx.from.id;
-  const first_name = ctx.from.first_name || "";
-  const lang = langOverride || detectLangTelegram(ctx, "");
-
-  try {
-    const { data } = await supabase
-      .from(SUPABASE_USERS_TABLE)
-      .select("id, lang")
-      .eq("tg_id", tg_id)
-      .maybeSingle();
-
-    if (!data) {
-      await supabase.from(SUPABASE_USERS_TABLE).insert([{ tg_id, first_name, lang }]);
-    } else {
-      await supabase
-        .from(SUPABASE_USERS_TABLE)
-        .update({ lang, first_name })
-        .eq("tg_id", tg_id);
-    }
-
-    // Ensure telegram prefs row exists
-    await supabase.from(SUPABASE_PREFS_TABLE).upsert(
-      [{ tg_id, mode: "friend", allow_emojis: true, updated_at: new Date().toISOString() }],
-      { onConflict: "tg_id" }
-    );
-  } catch (err) {
-    console.error("[ensureUserTelegram]", err?.message || err);
+  if (!data) {
+    // create default row
+    const row = {
+      user_key: k,
+      channel,
+      user_id: String(userId),
+      lang: DEFAULT_PREFS.lang,
+      friend_mode: true,
+      friend_mode_locked: true,
+      updated_at: nowIso(),
+    };
+    const ins = await supabase.from("hith_prefs").insert(row);
+    if (ins.error) console.warn("Supabase insertPrefs error:", ins.error.message);
+    return { ...DEFAULT_PREFS };
   }
+
+  return {
+    lang: data.lang || DEFAULT_PREFS.lang,
+    friend_mode: data.friend_mode !== false,
+    friend_mode_locked: data.friend_mode_locked !== false,
+  };
 }
 
-async function saveMessageTelegram(tg_id, role, content) {
-  try {
-    await supabase.from(SUPABASE_MESSAGES_TABLE).insert([{ tg_id, role, content }]);
-  } catch (err) {
-    console.error("[saveMessageTelegram]", err?.message || err);
+async function setPrefs(channel, userId, patch) {
+  const k = keyFor(channel, userId);
+  const next = { ...(await getPrefs(channel, userId)), ...patch };
+
+  if (!supabase) {
+    mem.prefs.set(k, next);
+    return next;
   }
+
+  const row = {
+    user_key: k,
+    channel,
+    user_id: String(userId),
+    lang: next.lang,
+    friend_mode: next.friend_mode,
+    friend_mode_locked: next.friend_mode_locked,
+    updated_at: nowIso(),
+  };
+
+  const { error } = await supabase
+    .from("hith_prefs")
+    .upsert(row, { onConflict: "user_key" });
+
+  if (error) console.warn("Supabase setPrefs error:", error.message);
+  return next;
 }
 
-async function getRecentHistoryTelegram(tg_id, limit = 10) {
-  try {
-    const { data, error } = await supabase
-      .from(SUPABASE_MESSAGES_TABLE)
-      .select("role, content")
-      .eq("tg_id", tg_id)
-      .order("created_at", { ascending: false })
-      .limit(limit);
+// -------------------- JOURNAL STORAGE --------------------
+async function saveJournalEntry(channel, userId, text) {
+  const k = keyFor(channel, userId);
+  const entry = {
+    id: shortId(),
+    created_at: nowIso(),
+    text: safeText(text),
+  };
 
-    if (error) return [];
-    return (data || []).reverse();
-  } catch {
+  if (!supabase) {
+    const arr = mem.journal.get(k) || [];
+    arr.unshift(entry);
+    mem.journal.set(k, arr);
+    return entry;
+  }
+
+  const { error } = await supabase.from("hith_journal").insert({
+    user_key: k,
+    channel,
+    user_id: String(userId),
+    entry_id: entry.id,
+    text: entry.text,
+    created_at: entry.created_at,
+  });
+
+  if (error) console.warn("Supabase saveJournalEntry error:", error.message);
+  return entry;
+}
+
+async function listJournalEntries(channel, userId, limit = 20) {
+  const k = keyFor(channel, userId);
+
+  if (!supabase) {
+    return (mem.journal.get(k) || []).slice(0, limit);
+  }
+
+  const { data, error } = await supabase
+    .from("hith_journal")
+    .select("entry_id, text, created_at")
+    .eq("user_key", k)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.warn("Supabase listJournalEntries error:", error.message);
     return [];
   }
+
+  return (data || []).map((r) => ({
+    id: r.entry_id,
+    text: r.text,
+    created_at: r.created_at,
+  }));
 }
 
-async function getTgPrefs(tg_id) {
-  try {
-    const { data, error } = await supabase
-      .from(SUPABASE_PREFS_TABLE)
-      .select("mode, allow_emojis")
-      .eq("tg_id", tg_id)
-      .maybeSingle();
-    if (error) throw error;
-    return data || { mode: "friend", allow_emojis: true };
-  } catch (e) {
-    console.error("[getTgPrefs]", e?.message || e);
-    return { mode: "friend", allow_emojis: true };
-  }
-}
-
-async function setTgPrefs(tg_id, patch) {
-  try {
-    await supabase.from(SUPABASE_PREFS_TABLE).upsert(
-      [{ tg_id, ...patch, updated_at: new Date().toISOString() }],
-      { onConflict: "tg_id" }
-    );
-  } catch (e) {
-    console.error("[setTgPrefs]", e?.message || e);
-  }
-}
-
-// ---------- WhatsApp Supabase ----------
-async function ensureWaPrefs(wa_id) {
-  try {
-    await supabase.from(SUPABASE_WA_PREFS_TABLE).upsert(
-      [{ wa_id, mode: "friend", allow_emojis: true, updated_at: new Date().toISOString() }],
-      { onConflict: "wa_id" }
-    );
-  } catch (e) {
-    console.error("[ensureWaPrefs]", e?.message || e);
-  }
-}
-
-async function getWaPrefs(wa_id) {
-  try {
-    const { data, error } = await supabase
-      .from(SUPABASE_WA_PREFS_TABLE)
-      .select("mode, allow_emojis")
-      .eq("wa_id", wa_id)
-      .maybeSingle();
-    if (error) throw error;
-    return data || { mode: "friend", allow_emojis: true };
-  } catch (e) {
-    console.error("[getWaPrefs]", e?.message || e);
-    return { mode: "friend", allow_emojis: true };
-  }
-}
-
-async function setWaPrefs(wa_id, patch) {
-  try {
-    await supabase.from(SUPABASE_WA_PREFS_TABLE).upsert(
-      [{ wa_id, ...patch, updated_at: new Date().toISOString() }],
-      { onConflict: "wa_id" }
-    );
-  } catch (e) {
-    console.error("[setWaPrefs]", e?.message || e);
-  }
-}
-
-async function saveMessageWhatsApp(wa_id, role, content) {
-  try {
-    await supabase.from(SUPABASE_WA_MESSAGES_TABLE).insert([{ wa_id, role, content }]);
-  } catch (e) {
-    console.error("[saveMessageWhatsApp]", e?.message || e);
-  }
-}
-
-async function getRecentHistoryWhatsApp(wa_id, limit = 10) {
-  try {
-    const { data, error } = await supabase
-      .from(SUPABASE_WA_MESSAGES_TABLE)
-      .select("role, content")
-      .eq("wa_id", wa_id)
-      .order("created_at", { ascending: false })
-      .limit(limit);
-    if (error) return [];
-    return (data || []).reverse();
-  } catch {
-    return [];
-  }
-}
-
-// ================== FRIEND MODE SYSTEM PROMPT ==================
-function buildSystemPrompt(lang, prefs, userUsedEmojiRecently) {
-  const mode = prefs?.mode || "friend";
-  const allowEmojis = prefs?.allow_emojis ?? true;
-
-  return `
-You are HITH. Your name is HITH.
-
-MODE: ${mode.toUpperCase()}.
-
-FRIEND MODE RULES:
-- Talk like a real friend. Natural, short, present.
-- No therapy language, no corporate support lines.
-- Do NOT say: "I'm here to support you", "let me know if", "we can explore", "it's important to feel heard/valued".
-- No nagging closers. No "next steps". No exercises.
-- You MAY ask a question only if it is clearly relevant to the user's last message OR it genuinely makes the conversation more interesting.
-- Otherwise, just respond.
-- Never promise secrecy/confidentiality. If asked, say you can't promise confidentiality but you will treat it with care.
-- Do not claim personal experiences or feelings.
-
-EMOJI RULES:
-- allow_emojis=${allowEmojis}
-- If allowed: use at most ONE emoji, and ONLY if user used emojis recently (${userUsedEmojiRecently ? "yes" : "no"}). Mirror tone (😂 -> 😂).
-- If not allowed OR userUsedEmojiRecently=no: use no emojis.
-
-LANGUAGE:
-- Reply strictly in ${lang}. Mirror the user's language. Never default to Italian.
+// -------------------- OPENAI (Responses API) --------------------
+async function hithReply({ userText, lang, friendMode }) {
+  const system = `
+You are ${HITH_NAME}.
+You are in FRIEND MODE: warm, human, playful, not clinical.
+Absolutely avoid therapeutic coaching, "small steps", "I'm here to support you", or nagging.
+Do not end every message with a question.
+Ask a question ONLY if it directly helps the current conversation OR makes it genuinely more interesting.
+Use a few emojis naturally (1 max) when it fits. Do not be stiff.
+Reply in the same language as the user. Language code: ${lang}.
+Keep replies concise and conversational.
+If the user asks if you can keep secrets: say you will treat it as private, but you cannot guarantee secrecy or safety.
 `.trim();
-}
 
-// ================== OUTPUT CLEANUP ==================
-function cleanupAssistantText(text = "", prefs, userUsedEmojiRecently) {
-  let t = (text || "").trim();
-
-  // kill “support script” lines
-  const kill = [
-    /(^|\n)\s*(i[' ]?m here to support you.*)$/gim,
-    /(^|\n)\s*(i[' ]?m here for you.*)$/gim,
-    /(^|\n)\s*(let me know.*)$/gim,
-    /(^|\n)\s*(if you[' ]?d like.*)$/gim,
-    /(^|\n)\s*(if you want.*)$/gim,
-    /(^|\n)\s*(we can explore.*)$/gim,
-    /(^|\n)\s*(it[' ]?s important.*)$/gim,
-  ];
-  for (const rx of kill) t = t.replace(rx, "");
-
-  // emoji control
-  const allowEmojis = prefs?.allow_emojis ?? true;
-  const emojiRx =
-    /([\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|\uD83E[\uDC00-\uDFFF])/g;
-
-  if (!allowEmojis || !userUsedEmojiRecently) {
-    t = t.replace(emojiRx, "");
-  } else {
-    const matches = t.match(emojiRx);
-    if (matches && matches.length > 1) {
-      let kept = 0;
-      t = t.replace(emojiRx, (m) => {
-        kept += 1;
-        return kept === 1 ? m : "";
-      });
-    }
-  }
-
-  // final tidy
-  t = t.replace(/\n{3,}/g, "\n\n").trim();
-  if (!t) t = "Ok.";
-  return t;
-}
-
-// ================== OPENAI CALL ==================
-async function askLLM({ lang, prefs, history, userText, userUsedEmojiRecently }) {
-  const system = buildSystemPrompt(lang, prefs, userUsedEmojiRecently);
-
-  const messages = [
+  const input = [
     { role: "system", content: system },
-    ...history.map((m) => ({ role: m.role, content: m.content })),
     { role: "user", content: userText },
   ];
 
-  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+  const resp = await fetch("https://api.openai.com/v1/responses", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
       "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
     },
     body: JSON.stringify({
-      model: "gpt-4o-mini",
-      messages,
-      temperature: 0.55,
-      max_tokens: 350,
+      model: OPENAI_MODEL,
+      input,
+      max_output_tokens: 220,
     }),
   });
 
   if (!resp.ok) {
-    const txt = await resp.text().catch(() => "");
-    throw new Error(`OpenAI error ${resp.status}: ${txt}`);
+    const t = await resp.text();
+    throw new Error(`OpenAI error ${resp.status}: ${t}`);
   }
 
-  const json = await resp.json();
-  return json.choices?.[0]?.message?.content?.trim() || "Ok.";
+  const data = await resp.json();
+  const out = (data.output_text || "").trim();
+  return out || (lang === "IT" ? "Ok." : lang === "DE" ? "Okay." : "Ok.");
 }
 
-// ================== RATE LIMIT ==================
-const lastSeen = new Map();
-function tooSoon(key) {
-  const now = Date.now();
-  if (lastSeen.has(key) && now - lastSeen.get(key) < 1200) return true;
-  lastSeen.set(key, now);
-  return false;
-}
+// -------------------- TELEGRAM --------------------
+const bot = BOT_TOKEN ? new Telegraf(BOT_TOKEN) : null;
 
-// ================== TELEGRAM SUBMENUS ==================
-function normalizeMenuText(t = "") {
-  return (t || "").trim().toLowerCase();
-}
-
-function journalLink(tg_id) {
-  return `${PUBLIC_URL}/journal?tg_id=${encodeURIComponent(tg_id)}`;
-}
-function progressLink(tg_id) {
-  return `${PUBLIC_URL}/progress?tg_id=${encodeURIComponent(tg_id)}`;
-}
-
-function journalMenu(lang, tg_id) {
-  const open = lang === "it" ? "📝 Scrivi" : lang === "de" ? "📝 Schreiben" : "📝 Write";
-  const hist = lang === "it" ? "📚 Storico" : lang === "de" ? "📚 Verlauf" : "📚 History";
+function telegramMainMenu() {
+  // IMPORTANT: callback buttons (not sending text)
   return Markup.inlineKeyboard([
-    [Markup.button.webApp(open, journalLink(tg_id))],
-    [Markup.button.callback(hist, "JOURNAL_HISTORY")],
+    [Markup.button.callback("📔 Journal", "MENU_JOURNAL"), Markup.button.callback("📊 Progress", "MENU_PROGRESS")],
+    [Markup.button.callback("📌 Coach", "MENU_COACH"), Markup.button.callback("⚡ SOS", "MENU_SOS")],
+    [Markup.button.callback("🔗 Invite", "MENU_INVITE"), Markup.button.callback("⚙️ Impostazioni", "MENU_SETTINGS")],
   ]);
 }
-function progressMenu(lang, tg_id) {
-  const open =
-    lang === "it" ? "📊 Apri Progress" : lang === "de" ? "📊 Fortschritt öffnen" : "📊 Open Progress";
-  return Markup.inlineKeyboard([[Markup.button.webApp(open, progressLink(tg_id))]]);
-}
-function settingsMenu(lang) {
-  const title =
-    lang === "it" ? "⚙️ Impostazioni" : lang === "de" ? "⚙️ Einstellungen" : "⚙️ Settings";
-  return {
-    title,
-    keyboard: Markup.inlineKeyboard([
-      [
-        Markup.button.callback("🇮🇹 IT", "LANG_it"),
-        Markup.button.callback("🇬🇧 EN", "LANG_en"),
-        Markup.button.callback("🇩🇪 DE", "LANG_de"),
-      ],
-      [Markup.button.callback("🔒 Friend mode locked", "MODE_friend")],
-    ]),
-  };
+
+function telegramSettingsMenu() {
+  return Markup.inlineKeyboard([
+    [
+      Markup.button.callback("🇮🇹 IT", "SET_LANG_IT"),
+      Markup.button.callback("🇬🇧 EN", "SET_LANG_EN"),
+      Markup.button.callback("🇩🇪 DE", "SET_LANG_DE"),
+    ],
+    [Markup.button.callback("🔒 Lock friend mode", "LOCK_FRIEND_MODE")],
+  ]);
 }
 
-// ================== TELEGRAM HANDLERS ==================
-bot.start(async (ctx) => {
-  const lang = detectLangTelegram(ctx, "");
-  await ensureUserTelegram(ctx, lang);
-  await ctx.reply(startText(lang), mainKeyboard(lang));
-});
+if (bot) {
+  // Webhook callback path for Telegram
+  const TG_PATH = "/tg-webhook";
+  app.use(TG_PATH, bot.webhookCallback(TG_PATH));
 
-bot.on("callback_query", async (ctx) => {
-  const tg_id = ctx.from.id;
-  const data = ctx.callbackQuery?.data || "";
+  bot.start(async (ctx) => {
+    const userId = ctx.from?.id;
+    const prefs = await getPrefs("tg", userId);
+    await ctx.reply(
+      prefs.lang === "IT"
+        ? "Ciao, sono Hith. 👋"
+        : prefs.lang === "DE"
+        ? "Hi, ich bin Hith. 👋"
+        : "Hey, I’m Hith. 👋",
+      telegramMainMenu()
+    );
+  });
 
-  try {
-    if (data.startsWith("LANG_")) {
-      const lang = data.replace("LANG_", "");
-      await ensureUserTelegram(ctx, lang);
-      await ctx.answerCbQuery("✅");
+  // Menu actions (NO AI chatter)
+  bot.action("MENU_JOURNAL", async (ctx) => {
+    try {
+      await ctx.answerCbQuery();
+      const userId = ctx.from.id;
+      const prefs = await getPrefs("tg", userId);
+
+      const url = `${PUBLIC_URL}/journal?channel=tg&user=${encodeURIComponent(
+        userId
+      )}&lang=${prefs.lang}`;
+
+      const msg =
+        prefs.lang === "IT"
+          ? "📔 Journal pronto. Aprilo qui:"
+          : prefs.lang === "DE"
+          ? "📔 Journal ist bereit. Öffne es hier:"
+          : "📔 Journal is ready. Open it here:";
+
       await ctx.reply(
-        lang === "it" ? "Lingua: IT ✅" : lang === "de" ? "Sprache: DE ✅" : "Language: EN ✅",
-        mainKeyboard(lang)
+        msg,
+        Markup.inlineKeyboard([Markup.button.url("Open Journal", url)])
       );
-      return;
+    } catch (e) {
+      console.error(e);
     }
+  });
 
-    if (data === "MODE_friend") {
-      await setTgPrefs(tg_id, { mode: "friend", allow_emojis: true });
-      await ctx.answerCbQuery("✅");
-      const lang = detectLangTelegram(ctx, "");
-      await ctx.reply("🔒 Friend mode locked. ✅", mainKeyboard(lang));
-      return;
-    }
+  bot.action("MENU_PROGRESS", async (ctx) => {
+    await ctx.answerCbQuery();
+    const userId = ctx.from.id;
+    const prefs = await getPrefs("tg", userId);
+    const msg =
+      prefs.lang === "IT"
+        ? "📊 Progress: (coming next) — per ora usiamo Journal."
+        : prefs.lang === "DE"
+        ? "📊 Fortschritt: (kommt als nächstes) — vorerst Journal nutzen."
+        : "📊 Progress: (coming next) — for now use Journal.";
+    await ctx.reply(msg);
+  });
 
-    if (data === "JOURNAL_HISTORY") {
-      const lang = detectLangTelegram(ctx, "");
-      const { data: rows, error } = await supabase
-        .from(SUPABASE_JOURNAL_TABLE)
-        .select("id, title, created_at")
-        .eq("tg_id", tg_id)
-        .order("created_at", { ascending: false })
-        .limit(10);
+  bot.action("MENU_COACH", async (ctx) => {
+    await ctx.answerCbQuery();
+    const userId = ctx.from.id;
+    const prefs = await getPrefs("tg", userId);
+    const msg =
+      prefs.lang === "IT"
+        ? "📌 Coach è attivo, ma in friend mode non faccio ‘terapia’. Dimmi cosa vuoi fare."
+        : prefs.lang === "DE"
+        ? "📌 Coach ist da, aber im Friend Mode keine Therapie. Sag mir, worauf du Bock hast."
+        : "📌 Coach is here — but in friend mode I’m not doing therapy. Tell me what you want.";
+    await ctx.reply(msg);
+  });
 
-      if (error) {
-        await ctx.answerCbQuery("⚠️");
-        await ctx.reply(lang === "it" ? "Errore storico." : lang === "de" ? "Verlauf-Fehler." : "History error.");
-        return;
-      }
+  bot.action("MENU_SOS", async (ctx) => {
+    await ctx.answerCbQuery();
+    const userId = ctx.from.id;
+    const prefs = await getPrefs("tg", userId);
+    const msg =
+      prefs.lang === "IT"
+        ? "⚡ SOS: Se c’è un’emergenza reale, chiama i servizi locali. Se vuoi, dimmi cosa sta succedendo in 1 frase."
+        : prefs.lang === "DE"
+        ? "⚡ SOS: Wenn es ein echter Notfall ist, ruf lokale Hilfe. Wenn du willst: 1 Satz, was los ist."
+        : "⚡ SOS: If it’s a real emergency, contact local services. If you want: 1 sentence—what’s happening.";
+    await ctx.reply(msg);
+  });
 
-      if (!rows || rows.length === 0) {
-        await ctx.answerCbQuery("✅");
-        await ctx.reply(
-          lang === "it" ? "Nessuna nota salvata ancora." : lang === "de" ? "Noch keine Notizen." : "No saved notes yet."
-        );
-        return;
-      }
+  bot.action("MENU_INVITE", async (ctx) => {
+    await ctx.answerCbQuery();
+    const msg = `Invite a friend:\nhttps://t.me/${ctx.botInfo.username}`;
+    await ctx.reply(msg);
+  });
 
-      const buttons = rows.map((r) => {
-        const d = new Date(r.created_at).toLocaleString(lang === "it" ? "it-IT" : lang === "de" ? "de-DE" : "en-US");
-        const label = `${r.title || "Untitled"} · ${d}`.slice(0, 60);
-        return [Markup.button.webApp(label, `${PUBLIC_URL}/journal?tg_id=${tg_id}&id=${r.id}`)];
+  bot.action("MENU_SETTINGS", async (ctx) => {
+    await ctx.answerCbQuery();
+    await ctx.reply("⚙️ Settings:", telegramSettingsMenu());
+  });
+
+  // Language set
+  bot.action(["SET_LANG_IT", "SET_LANG_EN", "SET_LANG_DE"], async (ctx) => {
+    await ctx.answerCbQuery();
+    const userId = ctx.from.id;
+    const code = ctx.callbackQuery.data.split("_").pop(); // IT/EN/DE
+    await setPrefs("tg", userId, { lang: code });
+    const msg =
+      code === "IT" ? "Lingua: IT ✅" : code === "DE" ? "Sprache: DE ✅" : "Language: EN ✅";
+    await ctx.reply(msg, telegramMainMenu());
+  });
+
+  // Lock friend mode (your request)
+  bot.action("LOCK_FRIEND_MODE", async (ctx) => {
+    await ctx.answerCbQuery();
+    const userId = ctx.from.id;
+    const prefs = await getPrefs("tg", userId);
+
+    await setPrefs("tg", userId, { friend_mode: true, friend_mode_locked: true });
+
+    const msg =
+      prefs.lang === "IT"
+        ? "🔒 Friend mode bloccata. Rimango ‘amica’, niente terapia."
+        : prefs.lang === "DE"
+        ? "🔒 Friend Mode gesperrt. Ich bleibe ‘freundlich’, keine Therapie."
+        : "🔒 Friend mode locked. I’ll stay ‘friend’, not therapy.";
+
+    await ctx.reply(msg, telegramMainMenu());
+  });
+
+  // Normal chat (AI) — NOT triggered by menu buttons
+  bot.on("text", async (ctx) => {
+    const userId = ctx.from?.id;
+    const text = safeText(ctx.message?.text);
+
+    // ignore commands
+    if (text.startsWith("/")) return;
+
+    const prefs = await getPrefs("tg", userId);
+    const lang = prefs.lang || guessLangFromText(text);
+
+    try {
+      const out = await hithReply({
+        userText: text,
+        lang,
+        friendMode: prefs.friend_mode,
       });
 
-      await ctx.answerCbQuery("✅");
-      await ctx.reply(lang === "it" ? "📚 Storico:" : lang === "de" ? "📚 Verlauf:" : "📚 History:", Markup.inlineKeyboard(buttons));
-      return;
+      // add a light emoji if none
+      const finalOut = addEmoji(lang, out);
+      await ctx.reply(finalOut, telegramMainMenu());
+    } catch (e) {
+      console.error("Telegram AI error:", e.message);
+      await ctx.reply("⚠️ Error. Try again.");
     }
+  });
 
-    await ctx.answerCbQuery("✅");
-  } catch (e) {
-    console.error("[callback_query]", e?.message || e);
-    try { await ctx.answerCbQuery("⚠️"); } catch {}
-  }
-});
-
-bot.on("text", async (ctx) => {
-  const text = (ctx.message.text || "").trim();
-  const tg_id = ctx.from.id;
-  if (!text) return;
-  if (text.startsWith("/start")) return;
-  if (tooSoon("tg:" + tg_id)) return;
-
-  const n = normalizeMenuText(text);
-  const lang = detectLangTelegram(ctx, text);
-  await ensureUserTelegram(ctx, lang);
-
-  // ✅ exact lock phrase
-  if (text === "Lock friend mode.") {
-    await setTgPrefs(tg_id, { mode: "friend", allow_emojis: true });
-    await ctx.reply("🔒 Friend mode locked. ✅", mainKeyboard(lang));
-    return;
-  }
-
-  // Settings
-  if (n.includes("impostazioni") || n === "settings" || n.includes("einstellungen")) {
-    const s = settingsMenu(lang);
-    await ctx.reply(s.title, s.keyboard);
-    return;
+  // Set Telegram webhook on boot
+  async function setupTelegramWebhook() {
+    if (!PUBLIC_URL) return;
+    const url = `${PUBLIC_URL}/tg-webhook`;
+    try {
+      const res = await fetch(
+        `https://api.telegram.org/bot${BOT_TOKEN}/setWebhook`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url,
+            allowed_updates: ["message", "callback_query"],
+          }),
+        }
+      );
+      const json = await res.json();
+      console.log("Telegram webhook:", json);
+    } catch (e) {
+      console.error("Telegram setWebhook failed:", e.message);
+    }
   }
 
-  // Menu: Journal / Progress
-  if (n.includes("journal")) {
-    await ctx.reply("📔 Journal", journalMenu(lang, tg_id));
-    return;
-  }
-  if (n.includes("progress") || n.includes("fortschritt")) {
-    await ctx.reply(lang === "de" ? "📊 Fortschritt" : "📊 Progress", progressMenu(lang, tg_id));
-    return;
-  }
+  // Expose for later call after server start
+  app.set("setupTelegramWebhook", setupTelegramWebhook);
+}
 
-  // Invite
-  if (n.includes("invite") || n.includes("einladen") || n.includes("invita")) {
-    const me = await bot.telegram.getMe();
-    const link = `https://t.me/${me.username}`;
-    const msg =
-      lang === "it" ? `Invita un’amica:\n${link}` : lang === "de" ? `Lade eine Freundin ein:\n${link}` : `Invite a friend:\n${link}`;
-    await ctx.reply(msg, mainKeyboard(lang));
-    return;
-  }
+// -------------------- JOURNAL WEB PAGE --------------------
+app.get("/journal", async (req, res) => {
+  const channel = req.query.channel || "tg";
+  const userId = req.query.user || "";
+  const lang = (req.query.lang || "EN").toUpperCase();
 
-  // Normal chat -> AI
-  const prefs = await getTgPrefs(tg_id);
-  const userUsedEmojiRecently = isEmojiRecent(text);
+  // tiny UI copy
+  const t =
+    lang === "IT"
+      ? {
+          title: "HITH · Journal",
+          placeholder: "Scrivi qui…",
+          save: "Salva",
+          share: "Condividi",
+          print: "Stampa",
+          history: "Storico",
+        }
+      : lang === "DE"
+      ? {
+          title: "HITH · Journal",
+          placeholder: "Schreib hier…",
+          save: "Speichern",
+          share: "Teilen",
+          print: "Drucken",
+          history: "Verlauf",
+        }
+      : {
+          title: "HITH · Journal",
+          placeholder: "Write here…",
+          save: "Save",
+          share: "Share",
+          print: "Print",
+          history: "History",
+        };
 
-  await saveMessageTelegram(tg_id, "user", text);
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.end(`<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>${t.title}</title>
+<style>
+  :root{--bg:#07070a;--card:#0f0f14;--gold:#d4af37;--text:#f5f5f5;--muted:#a8a8a8;}
+  body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial;background:radial-gradient(circle at top,#1b1b22 0,#07070a 60%);color:var(--text);padding:18px;}
+  .wrap{max-width:900px;margin:0 auto;}
+  .card{background:rgba(0,0,0,.6);border:1px solid rgba(212,175,55,.25);border-radius:16px;padding:16px;}
+  h1{margin:0 0 12px;font-size:18px;letter-spacing:.4px}
+  textarea{width:100%;min-height:260px;border-radius:14px;border:1px solid rgba(212,175,55,.25);background:var(--card);color:var(--text);padding:14px;font-size:16px;outline:none;resize:vertical;}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  button{border:0;border-radius:12px;padding:10px 14px;font-weight:600;cursor:pointer}
+  .gold{background:var(--gold);color:#111}
+  .ghost{background:transparent;border:1px solid rgba(212,175,55,.35);color:var(--text)}
+  .list{margin-top:14px;color:var(--muted);font-size:14px}
+  .entry{margin-top:10px;padding:10px;border-radius:12px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)}
+  .meta{font-size:12px;color:var(--muted);margin-bottom:6px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <h1>📔 ${t.title}</h1>
+    <textarea id="text" placeholder="${t.placeholder}"></textarea>
+    <div class="row">
+      <button class="gold" id="save">${t.save}</button>
+      <button class="ghost" id="share">${t.share}</button>
+      <button class="ghost" id="print">${t.print}</button>
+    </div>
+    <div class="list">
+      <div style="margin-top:14px;font-weight:700;color:var(--text)">${t.history}</div>
+      <div id="history"></div>
+    </div>
+  </div>
+</div>
 
-  try {
-    await ctx.sendChatAction("typing");
-    const history = await getRecentHistoryTelegram(tg_id, 10);
+<script>
+  const channel = ${JSON.stringify(channel)};
+  const user = ${JSON.stringify(userId)};
+  const historyEl = document.getElementById("history");
+  const textEl = document.getElementById("text");
 
-    const answerRaw = await askLLM({
-      lang,
-      prefs,
-      history,
-      userText: text,
-      userUsedEmojiRecently,
+  async function loadHistory(){
+    const r = await fetch("/api/journal/list?channel="+encodeURIComponent(channel)+"&user="+encodeURIComponent(user));
+    const j = await r.json();
+    historyEl.innerHTML = "";
+    (j.items || []).forEach(it=>{
+      const d = document.createElement("div");
+      d.className = "entry";
+      d.innerHTML = '<div class="meta">'+new Date(it.created_at).toLocaleString()+'</div><div>'+escapeHtml(it.text)+'</div>';
+      historyEl.appendChild(d);
     });
-
-    const answer = cleanupAssistantText(answerRaw, prefs, userUsedEmojiRecently);
-    await saveMessageTelegram(tg_id, "assistant", answer);
-    await ctx.reply(answer, mainKeyboard(lang));
-  } catch (err) {
-    console.error("[tg text]", err?.message || err);
-    await ctx.reply(lang === "it" ? "Ok. Riproviamo." : "Ok. Try again.", mainKeyboard(lang));
   }
-});
-app.get("/whatsapp/webhook", (req, res) => {
-  console.log("✅ WhatsApp GET webhook HIT");
-  res.status(200).send("WHATSAPP WEBHOOK OK");
-});
-// ================== WHATSAPP WEBHOOK ==================
 
-// Verify (GET)
+  function escapeHtml(s){
+    return (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  }
+
+  document.getElementById("save").onclick = async ()=>{
+    const text = (textEl.value || "").trim();
+    if(!text) return;
+    await fetch("/api/journal/save", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({ channel, user, text })
+    });
+    textEl.value = "";
+    await loadHistory();
+  };
+
+  document.getElementById("share").onclick = async ()=>{
+    const text = (textEl.value || "").trim();
+    if(!text) return;
+    if(navigator.share){
+      try{ await navigator.share({ text }); } catch(e){}
+    } else {
+      await navigator.clipboard.writeText(text);
+      alert("Copied ✅");
+    }
+  };
+
+  document.getElementById("print").onclick = ()=>{
+    window.print();
+  };
+
+  loadHistory();
+</script>
+</body>
+</html>`);
+});
+
+app.post("/api/journal/save", async (req, res) => {
+  const channel = safeText(req.body?.channel || "tg");
+  const user = safeText(req.body?.user || "");
+  const text = safeText(req.body?.text || "");
+  if (!user || !text) return res.status(400).json({ ok: false });
+  const entry = await saveJournalEntry(channel, user, text);
+  res.json({ ok: true, entry });
+});
+
+app.get("/api/journal/list", async (req, res) => {
+  const channel = safeText(req.query.channel || "tg");
+  const user = safeText(req.query.user || "");
+  if (!user) return res.json({ ok: true, items: [] });
+  const items = await listJournalEntries(channel, user, 20);
+  res.json({ ok: true, items });
+});
+
+// -------------------- WHATSAPP WEBHOOK (Meta verify requires GET) --------------------
 app.get("/whatsapp/webhook", (req, res) => {
+  // Meta verification:
+  // hub.mode=subscribe
+  // hub.verify_token=...
+  // hub.challenge=...
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  if (mode === "subscribe" && token && token === WHATSAPP_VERIFY_TOKEN) {
-    console.log("✅ WhatsApp webhook verified");
+  if (mode === "subscribe" && token === WHATSAPP_VERIFY_TOKEN) {
     return res.status(200).send(challenge);
   }
-  console.warn("❌ WhatsApp webhook verification failed");
   return res.sendStatus(403);
 });
 
-// Send message via Meta Cloud API
-async function sendWhatsAppText(to, body) {
+app.post("/whatsapp/webhook", async (req, res) => {
+  // Always ACK fast
+  res.sendStatus(200);
+
+  try {
+    const body = req.body;
+
+    // Typical message shape:
+    // entry[0].changes[0].value.messages[0]
+    const entry = body?.entry?.[0];
+    const change = entry?.changes?.[0];
+    const value = change?.value;
+
+    const msg = value?.messages?.[0];
+    if (!msg) return;
+
+    const from = msg.from; // WhatsApp user number (string)
+    const text = msg?.text?.body || "";
+
+    const prefs = await getPrefs("wa", from);
+    const lang = prefs.lang || guessLangFromText(text);
+
+    const out = await hithReply({
+      userText: text,
+      lang,
+      friendMode: true,
+    });
+
+    await sendWhatsAppText(from, addEmoji(lang, out));
+  } catch (e) {
+    console.error("WhatsApp webhook error:", e.message);
+  }
+});
+
+async function sendWhatsAppText(to, text) {
   if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_ID) {
-    console.warn("⚠️ WhatsApp env missing (WHATSAPP_TOKEN / WHATSAPP_PHONE_ID).");
+    console.warn("WhatsApp not configured (missing WHATSAPP_TOKEN / WHATSAPP_PHONE_ID)");
     return;
   }
-  await fetch(`https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_ID}/messages`, {
+
+  const url = `https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_ID}/messages`;
+
+  const payload = {
+    messaging_product: "whatsapp",
+    to,
+    type: "text",
+    text: { body: text },
+  };
+
+  const r = await fetch(url, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${WHATSAPP_TOKEN}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({
-      messaging_product: "whatsapp",
-      to,
-      text: { body },
-    }),
+    body: JSON.stringify(payload),
   });
-}
 
-// Messages (POST)
-app.post("/whatsapp/webhook", async (req, res) => {
-  // Respond fast to Meta
-  res.sendStatus(200);
-
-  try {
-    const payload = req.body;
-
-    if (payload?.object !== "whatsapp_business_account") return;
-
-    const entry = payload.entry?.[0];
-    const change = entry?.changes?.[0];
-    const value = change?.value;
-
-    const message = value?.messages?.[0];
-    if (!message) return; // ignore statuses etc
-
-    const from = message.from; // wa_id (phone as string)
-    const text = message.text?.body || "";
-
-    if (!from || !text) return;
-    if (tooSoon("wa:" + from)) return;
-
-    console.log(`📩 WhatsApp from ${from}: ${text}`);
-
-    // ensure prefs exist
-    await ensureWaPrefs(from);
-
-    // lock phrase on WhatsApp too
-    if (text.trim() === "Lock friend mode.") {
-      await setWaPrefs(from, { mode: "friend", allow_emojis: true });
-      await sendWhatsAppText(from, "🔒 Friend mode locked. ✅");
-      return;
-    }
-
-    const lang = detectLangFromText(text) || "en";
-    const prefs = await getWaPrefs(from);
-    const userUsedEmojiRecently = isEmojiRecent(text);
-
-    await saveMessageWhatsApp(from, "user", text);
-
-    const history = await getRecentHistoryWhatsApp(from, 10);
-
-    const answerRaw = await askLLM({
-      lang,
-      prefs,
-      history,
-      userText: text,
-      userUsedEmojiRecently,
-    });
-
-    const answer = cleanupAssistantText(answerRaw, prefs, userUsedEmojiRecently);
-
-    await saveMessageWhatsApp(from, "assistant", answer);
-    await sendWhatsAppText(from, answer);
-  } catch (err) {
-    console.error("❌ WhatsApp webhook error:", err?.message || err);
-  }
-});
-
-// ================== TELEGRAM WEBHOOK ==================
-const SECRET_PATH = "/tg-webhook";
-const WEBHOOK_URL = `${PUBLIC_URL}${SECRET_PATH}`;
-console.log("WEBHOOK_URL:", WEBHOOK_URL);
-
-// ✅ IMPORTANT: this is the correct Express usage
-app.use(bot.webhookCallback(SECRET_PATH));
-
-async function setupTelegramWebhook() {
-  try {
-    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/deleteWebhook?drop_pending_updates=true`);
-    const resp = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/setWebhook`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        url: WEBHOOK_URL,
-        allowed_updates: ["message", "callback_query"],
-      }),
-    });
-    console.log("[setWebhook]", await resp.json());
-  } catch (err) {
-    console.error("[setWebhook] failed:", err?.message || err);
+  if (!r.ok) {
+    const t = await r.text();
+    console.error("WhatsApp send failed:", r.status, t);
   }
 }
 
-// ================== JOURNAL WEBAPP ==================
-function journalHtml() {
-  return `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>HITH · Journal</title>
-<style>
-  :root{--bg:#050507;--text:#f5f5f5;--muted:#a7a7a7;--line:rgba(255,255,255,.08)}
-  body{margin:0;font-family:system-ui;background:radial-gradient(circle at top,#222 0,#050507 55%);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:18px}
-  .card{max-width:980px;width:100%;background:rgba(0,0,0,.72);border:1px solid var(--line);border-radius:18px;padding:16px}
-  h1{margin:0 0 10px;font-size:18px}
-  input,textarea{width:100%;background:rgba(255,255,255,.03);color:var(--text);border:1px solid var(--line);border-radius:12px;padding:12px;outline:none}
-  textarea{min-height:320px;resize:vertical;line-height:1.55}
-  .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
-  button{background:rgba(255,255,255,.03);border:1px solid var(--line);color:var(--text);border-radius:12px;padding:10px 12px;cursor:pointer}
-  .hint{margin-top:10px;font-size:12px;color:var(--muted)}
-</style>
-</head>
-<body>
-  <div class="card">
-    <h1>HITH · Journal</h1>
-    <input id="title" placeholder="Title (optional)" />
-    <div style="height:10px"></div>
-    <textarea id="content" placeholder="Write here…"></textarea>
-    <div class="row">
-      <button id="save">Save</button>
-      <button id="share">Share</button>
-      <button id="print">Print</button>
-      <button id="clear">Clear</button>
-    </div>
-    <div class="hint">Saved notes are stored in Supabase (tg_id).</div>
-  </div>
-
-<script>
-  const qs = new URLSearchParams(location.search);
-  const tg_id = qs.get("tg_id");
-
-  const titleEl = document.getElementById("title");
-  const contentEl = document.getElementById("content");
-
-  async function api(path, body){
-    const r = await fetch(path, { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(body) });
-    if(!r.ok) throw new Error(await r.text());
-    return r.json();
-  }
-
-  document.getElementById("save").onclick = async ()=>{
-    const title = (titleEl.value||"").trim();
-    const content = (contentEl.value||"").trim();
-    if(!tg_id || !content) return;
-    await api("/api/journal/save", { tg_id, title, content });
-    alert("Saved");
-  };
-
-  document.getElementById("share").onclick = async ()=>{
-    const text = (contentEl.value||"").trim();
-    if(!text) return;
-    try{
-      if(navigator.share){ await navigator.share({ title: titleEl.value||"Journal", text }); }
-      else { await navigator.clipboard.writeText(text); alert("Copied"); }
-    }catch(e){}
-  };
-
-  document.getElementById("print").onclick = ()=>{
-    const title = (titleEl.value||"Journal").trim();
-    const content = (contentEl.value||"").trim();
-    const w = window.open("", "_blank");
-    w.document.write("<pre style='font-family:system-ui;white-space:pre-wrap'>"+title+"\\n\\n"+content+"</pre>");
-    w.document.close(); w.focus(); w.print(); w.close();
-  };
-
-  document.getElementById("clear").onclick = ()=>{ titleEl.value=""; contentEl.value=""; };
-</script>
-</body>
-</html>`;
-}
-
-app.get("/journal", (_req, res) => res.status(200).send(journalHtml()));
-
-app.get("/progress", (_req, res) => {
-  res.status(200).send("HITH Progress — coming next.");
+// -------------------- HEALTH ROUTES --------------------
+app.get("/", (req, res) => {
+  res.status(200).send("HITH is alive.");
 });
 
-app.post("/api/journal/save", async (req, res) => {
-  try {
-    const { tg_id, title, content } = req.body || {};
-    if (!tg_id || !content) return res.status(400).json({ ok: false });
-
-    const { error } = await supabase.from(SUPABASE_JOURNAL_TABLE).insert([
-      { tg_id: Number(tg_id), title: title || null, content },
-    ]);
-    if (error) throw error;
-
-    res.json({ ok: true });
-  } catch (e) {
-    console.error("[/api/journal/save]", e?.message || e);
-    res.status(500).json({ ok: false });
-  }
+app.get("/health", (req, res) => {
+  res.json({
+    ok: true,
+    time: nowIso(),
+    public_url: PUBLIC_URL,
+    telegram: !!BOT_TOKEN,
+    whatsapp: {
+      verify_token_set: !!WHATSAPP_VERIFY_TOKEN,
+      token_set: !!WHATSAPP_TOKEN,
+      phone_id_set: !!WHATSAPP_PHONE_ID,
+    },
+    supabase: !!supabase,
+  });
 });
 
-
-// ================== BASE ROUTE ==================
-app.get("/", (_req, res) => {
-  res.status(200).send("HITH bot is running.");
-});
-
-// ================== START SERVER ==================
+// -------------------- START SERVER --------------------
 app.listen(PORT, async () => {
-  console.log(`🚀 Server listening on ${PORT}`);
-  console.log(`🌍 PUBLIC_URL base: ${PUBLIC_URL}`);
-  console.log(`🤖 Telegram webhook URL: ${WEBHOOK_URL}`);
+  console.log("✅ Server listening on", PORT);
+  console.log("PUBLIC_URL:", PUBLIC_URL);
 
-  await setupTelegramWebhook();
+  if (supabase) console.log("Supabase connection OK");
 
-  // Supabase connection test
-  try {
-    const { error } = await supabase
-      .from(SUPABASE_USERS_TABLE)
-      .select("id", { head: true, count: "exact" });
+  // Telegram webhook setup after server is listening
+  const setupTelegramWebhook = app.get("setupTelegramWebhook");
+  if (setupTelegramWebhook) await setupTelegramWebhook();
 
-    if (error) console.error("❌ Supabase connection error:", error.message);
-    else console.log("✅ Supabase connection OK");
-  } catch (err) {
-    console.error("❌ Supabase connection error:", err?.message || err);
-  }
+  console.log("Telegram webhook URL:", PUBLIC_URL ? `${PUBLIC_URL}/tg-webhook` : "(missing PUBLIC_URL)");
+  console.log("WhatsApp webhook URL:", PUBLIC_URL ? `${PUBLIC_URL}/whatsapp/webhook` : "(missing PUBLIC_URL)");
 });
