@@ -566,100 +566,9 @@ bot.on("text", async (ctx) => {
     await ctx.reply(lang === "it" ? "Ok. Riproviamo." : "Ok. Try again.", mainKeyboard(lang));
   }
 });
-// ================== WHATSAPP WEBHOOK ==================
-
-// Verify (GET)
 app.get("/whatsapp/webhook", (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode === "subscribe" && token && token === WHATSAPP_VERIFY_TOKEN) {
-    console.log("✅ WhatsApp webhook verified");
-    return res.status(200).send(challenge);
-  }
-  console.warn("❌ WhatsApp webhook verification failed");
-  return res.sendStatus(403);
-});
-
-// Send message via Meta Cloud API
-async function sendWhatsAppText(to, body) {
-  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_ID) {
-    console.warn("⚠️ WhatsApp env missing (WHATSAPP_TOKEN / WHATSAPP_PHONE_ID).");
-    return;
-  }
-  await fetch(`https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_ID}/messages`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      messaging_product: "whatsapp",
-      to,
-      text: { body },
-    }),
-  });
-}
-
-// Messages (POST)
-app.post("/whatsapp/webhook", async (req, res) => {
-  // Respond fast to Meta
-  res.sendStatus(200);
-
-  try {
-    const payload = req.body;
-
-    if (payload?.object !== "whatsapp_business_account") return;
-
-    const entry = payload.entry?.[0];
-    const change = entry?.changes?.[0];
-    const value = change?.value;
-
-    const message = value?.messages?.[0];
-    if (!message) return; // ignore statuses etc
-
-    const from = message.from; // wa_id (phone as string)
-    const text = message.text?.body || "";
-
-    if (!from || !text) return;
-    if (tooSoon("wa:" + from)) return;
-
-    console.log(`📩 WhatsApp from ${from}: ${text}`);
-
-    // ensure prefs exist
-    await ensureWaPrefs(from);
-
-    // lock phrase on WhatsApp too
-    if (text.trim() === "Lock friend mode.") {
-      await setWaPrefs(from, { mode: "friend", allow_emojis: true });
-      await sendWhatsAppText(from, "🔒 Friend mode locked. ✅");
-      return;
-    }
-
-    const lang = detectLangFromText(text) || "en";
-    const prefs = await getWaPrefs(from);
-    const userUsedEmojiRecently = isEmojiRecent(text);
-
-    await saveMessageWhatsApp(from, "user", text);
-
-    const history = await getRecentHistoryWhatsApp(from, 10);
-
-    const answerRaw = await askLLM({
-      lang,
-      prefs,
-      history,
-      userText: text,
-      userUsedEmojiRecently,
-    });
-
-    const answer = cleanupAssistantText(answerRaw, prefs, userUsedEmojiRecently);
-
-    await saveMessageWhatsApp(from, "assistant", answer);
-    await sendWhatsAppText(from, answer);
-  } catch (err) {
-    console.error("❌ WhatsApp webhook error:", err?.message || err);
-  }
+  console.log("✅ WhatsApp GET webhook HIT");
+  res.status(200).send("WHATSAPP WEBHOOK OK");
 });
 
 // ================== TELEGRAM WEBHOOK ==================
@@ -789,6 +698,101 @@ app.post("/api/journal/save", async (req, res) => {
   }
 });
 
+// ================== WHATSAPP WEBHOOK ==================
+
+// Verify (GET)
+app.get("/whatsapp/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (mode === "subscribe" && token && token === WHATSAPP_VERIFY_TOKEN) {
+    console.log("✅ WhatsApp webhook verified");
+    return res.status(200).send(challenge);
+  }
+  console.warn("❌ WhatsApp webhook verification failed");
+  return res.sendStatus(403);
+});
+
+// Send message via Meta Cloud API
+async function sendWhatsAppText(to, body) {
+  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_ID) {
+    console.warn("⚠️ WhatsApp env missing (WHATSAPP_TOKEN / WHATSAPP_PHONE_ID).");
+    return;
+  }
+  await fetch(`https://graph.facebook.com/v19.0/${WHATSAPP_PHONE_ID}/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      text: { body },
+    }),
+  });
+}
+
+// Messages (POST)
+app.post("/whatsapp/webhook", async (req, res) => {
+  // Respond fast to Meta
+  res.sendStatus(200);
+
+  try {
+    const payload = req.body;
+
+    if (payload?.object !== "whatsapp_business_account") return;
+
+    const entry = payload.entry?.[0];
+    const change = entry?.changes?.[0];
+    const value = change?.value;
+
+    const message = value?.messages?.[0];
+    if (!message) return; // ignore statuses etc
+
+    const from = message.from; // wa_id (phone as string)
+    const text = message.text?.body || "";
+
+    if (!from || !text) return;
+    if (tooSoon("wa:" + from)) return;
+
+    console.log(`📩 WhatsApp from ${from}: ${text}`);
+
+    // ensure prefs exist
+    await ensureWaPrefs(from);
+
+    // lock phrase on WhatsApp too
+    if (text.trim() === "Lock friend mode.") {
+      await setWaPrefs(from, { mode: "friend", allow_emojis: true });
+      await sendWhatsAppText(from, "🔒 Friend mode locked. ✅");
+      return;
+    }
+
+    const lang = detectLangFromText(text) || "en";
+    const prefs = await getWaPrefs(from);
+    const userUsedEmojiRecently = isEmojiRecent(text);
+
+    await saveMessageWhatsApp(from, "user", text);
+
+    const history = await getRecentHistoryWhatsApp(from, 10);
+
+    const answerRaw = await askLLM({
+      lang,
+      prefs,
+      history,
+      userText: text,
+      userUsedEmojiRecently,
+    });
+
+    const answer = cleanupAssistantText(answerRaw, prefs, userUsedEmojiRecently);
+
+    await saveMessageWhatsApp(from, "assistant", answer);
+    await sendWhatsAppText(from, answer);
+  } catch (err) {
+    console.error("❌ WhatsApp webhook error:", err?.message || err);
+  }
+});
 
 // ================== BASE ROUTE ==================
 app.get("/", (_req, res) => {
