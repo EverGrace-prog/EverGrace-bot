@@ -264,6 +264,108 @@ Regeln:
   return out || "…";
 }
 
+
+// ---------------- WHATSAPP (META) ----------------
+
+// Verification endpoint (Meta calls this)
+app.get(WA_PATH, (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+
+  if (mode === "subscribe" && token && token === WHATSAPP_VERIFY_TOKEN) {
+    return res.status(200).send(challenge);
+  }
+  return res.sendStatus(403);
+});
+
+// Receive messages endpoint
+app.post(WA_PATH, async (req, res) => {
+  // ACK fast (Meta wants 200 quickly)
+  res.sendStatus(200);
+
+  try {
+    const body = req.body;
+
+    const entry = body?.entry?.[0];
+    const change = entry?.changes?.[0];
+    const value = change?.value;
+
+    const msg = value?.messages?.[0];
+    if (!msg) return;
+
+    const from = msg.from; // WA user phone number (string)
+    const text = msg?.text?.body || "";
+
+    const prefs = await getPrefs("wa", from);
+
+    // language: follow user text unless user forced a lang
+    const detected = guessLangFromText(text);
+    const lang = prefs.lang || detected;
+
+    // Friend mode is locked ON
+    if (!prefs.friendModeLocked || prefs.friendMode !== true) {
+      await setPrefs("wa", from, { friendModeLocked: true, friendMode: true });
+    }
+
+    // Simple text commands for WA
+    if (safeLower(text).includes("lock friend mode") || safeLower(text).includes("blocca modalità amica")) {
+      await setPrefs("wa", from, { friendModeLocked: true, friendMode: true });
+      const confirm = {
+        it: "Modalità amica bloccata ✅",
+        en: "Friend mode locked ✅",
+        de: "Freund-Modus gesperrt ✅",
+      }[lang] || "Friend mode locked ✅";
+      await sendWhatsAppText(from, confirm);
+      return;
+    }
+
+    // secrets honesty
+    if (safeLower(text).includes("secret") || safeLower(text).includes("segreto") || safeLower(text).includes("geheim")) {
+      const honest = {
+        it: "Posso ascoltarti, ma non posso garantire riservatezza assoluta come una cassaforte. Se vuoi, dimmi solo ciò che ti fa sentire al sicuro 🙂",
+        en: "I can listen, but I can’t guarantee absolute confidentiality like a vault. Share only what feels safe 🙂",
+        de: "Ich kann zuhören, aber ich kann keine absolute Vertraulichkeit wie ein Tresor garantieren. Teile nur, was sich sicher anfühlt 🙂",
+      }[lang] || "I can listen, but I can’t guarantee absolute confidentiality like a vault. Share only what feels safe 🙂";
+      await sendWhatsAppText(from, honest);
+      return;
+    }
+
+    const out = await askHithAI({ userText: text, lang, friendMode: true });
+    await sendWhatsAppText(from, addEmoji(lang, out));
+  } catch (e) {
+    console.error("WhatsApp webhook error:", e?.message || e);
+  }
+});
+
+async function sendWhatsAppText(to, text) {
+  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_ID) {
+    console.warn("WhatsApp not configured (missing WHATSAPP_TOKEN / WHATSAPP_PHONE_ID)");
+    return;
+  }
+
+  const url = `https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_ID}/messages`;
+  const payload = {
+    messaging_product: "whatsapp",
+    to,
+    type: "text",
+    text: { body: text },
+  };
+
+  const resp = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!resp.ok) {
+    const t = await resp.text().catch(() => "");
+    console.error("WhatsApp send failed:", resp.status, t);
+  }
+}
 // ---------------- TELEGRAM ----------------
 let bot = null;
 
@@ -393,108 +495,6 @@ async function setupTelegram() {
     } catch (e) {
       console.error("Telegram setWebhook failed:", e?.message || e);
     }
-  }
-}
-
-// ---------------- WHATSAPP (META) ----------------
-
-// Verification endpoint (Meta calls this)
-app.get(WA_PATH, (req, res) => {
-  const mode = req.query["hub.mode"];
-  const token = req.query["hub.verify_token"];
-  const challenge = req.query["hub.challenge"];
-
-  if (mode === "subscribe" && token && token === WHATSAPP_VERIFY_TOKEN) {
-    return res.status(200).send(challenge);
-  }
-  return res.sendStatus(403);
-});
-
-// Receive messages endpoint
-app.post(WA_PATH, async (req, res) => {
-  // ACK fast (Meta wants 200 quickly)
-  res.sendStatus(200);
-
-  try {
-    const body = req.body;
-
-    const entry = body?.entry?.[0];
-    const change = entry?.changes?.[0];
-    const value = change?.value;
-
-    const msg = value?.messages?.[0];
-    if (!msg) return;
-
-    const from = msg.from; // WA user phone number (string)
-    const text = msg?.text?.body || "";
-
-    const prefs = await getPrefs("wa", from);
-
-    // language: follow user text unless user forced a lang
-    const detected = guessLangFromText(text);
-    const lang = prefs.lang || detected;
-
-    // Friend mode is locked ON
-    if (!prefs.friendModeLocked || prefs.friendMode !== true) {
-      await setPrefs("wa", from, { friendModeLocked: true, friendMode: true });
-    }
-
-    // Simple text commands for WA
-    if (safeLower(text).includes("lock friend mode") || safeLower(text).includes("blocca modalità amica")) {
-      await setPrefs("wa", from, { friendModeLocked: true, friendMode: true });
-      const confirm = {
-        it: "Modalità amica bloccata ✅",
-        en: "Friend mode locked ✅",
-        de: "Freund-Modus gesperrt ✅",
-      }[lang] || "Friend mode locked ✅";
-      await sendWhatsAppText(from, confirm);
-      return;
-    }
-
-    // secrets honesty
-    if (safeLower(text).includes("secret") || safeLower(text).includes("segreto") || safeLower(text).includes("geheim")) {
-      const honest = {
-        it: "Posso ascoltarti, ma non posso garantire riservatezza assoluta come una cassaforte. Se vuoi, dimmi solo ciò che ti fa sentire al sicuro 🙂",
-        en: "I can listen, but I can’t guarantee absolute confidentiality like a vault. Share only what feels safe 🙂",
-        de: "Ich kann zuhören, aber ich kann keine absolute Vertraulichkeit wie ein Tresor garantieren. Teile nur, was sich sicher anfühlt 🙂",
-      }[lang] || "I can listen, but I can’t guarantee absolute confidentiality like a vault. Share only what feels safe 🙂";
-      await sendWhatsAppText(from, honest);
-      return;
-    }
-
-    const out = await askHithAI({ userText: text, lang, friendMode: true });
-    await sendWhatsAppText(from, addEmoji(lang, out));
-  } catch (e) {
-    console.error("WhatsApp webhook error:", e?.message || e);
-  }
-});
-
-async function sendWhatsAppText(to, text) {
-  if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_ID) {
-    console.warn("WhatsApp not configured (missing WHATSAPP_TOKEN / WHATSAPP_PHONE_ID)");
-    return;
-  }
-
-  const url = `https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_ID}/messages`;
-  const payload = {
-    messaging_product: "whatsapp",
-    to,
-    type: "text",
-    text: { body: text },
-  };
-
-  const resp = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!resp.ok) {
-    const t = await resp.text().catch(() => "");
-    console.error("WhatsApp send failed:", resp.status, t);
   }
 }
 
