@@ -1,14 +1,15 @@
 /**
  * HITH — Telegram + WhatsApp (Meta) unified bot
- * - One Render service
- * - ONE PUBLIC_URL (base): https://your-service.onrender.com
- * - Telegram webhook path: /tg-webhook
- * - WhatsApp webhook path: /whatsapp/webhook  (GET verify + POST receive)
+ * One Render service
+ * ONE PUBLIC_URL (base only): https://your-service.onrender.com
+ *
+ * Telegram webhook path: /tg-webhook
+ * WhatsApp webhook path: /whatsapp/webhook (GET verify + POST receive)
  *
  * Env required:
- *   PORT
- *   PUBLIC_URL                 (BASE ONLY, no /path)
- *   OPENAI_API_KEY
+ *   PORT (optional)
+ *   PUBLIC_URL   (BASE ONLY, no /path)
+ *   OPENAI_API_KEY (optional, if you use AI)
  *
  * Telegram:
  *   TELEGRAM_BOT_TOKEN
@@ -18,24 +19,24 @@
  *   WHATSAPP_PHONE_ID
  *   WHATSAPP_VERIFY_TOKEN
  *
- * Supabase optional (prefs persistence):
+ * Supabase optional:
  *   SUPABASE_URL
- *   SUPABASE_SERVICE_ROLE   (recommended) OR SUPABASE_KEY
- *   SUPABASE_TABLE          (optional, default: hith_prefs)
+ *   SUPABASE_SERVICE_ROLE (recommended) OR SUPABASE_KEY
+ *   SUPABASE_TABLE (optional, default: hith_prefs)
  */
 
 import express from "express";
 import crypto from "crypto";
-import { Telegraf, Markup } from "telegraf";
+import { Telegraf } from "telegraf";
 import { createClient } from "@supabase/supabase-js";
 
-const app = express();
-app.use(express.json({ limit: "2mb" })); // needed for WhatsApp payloads
-
-// ---------------- ENV ----------------
+// -------------------- ENV --------------------
 const PORT = process.env.PORT || 10000;
 
-const PUBLIC_URL = (process.env.PUBLIC_URL || "").trim().replace(/\/+$/, ""); // base only
+const PUBLIC_URL = (process.env.PUBLIC_URL || "")
+  .trim()
+  .replace(/\/+$/, ""); // base only
+
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
@@ -49,223 +50,245 @@ const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_KEY;
 const SUPABASE_TABLE = process.env.SUPABASE_TABLE || "hith_prefs";
 
+// -------------------- CONSTANTS --------------------
 const TG_PATH = "/tg-webhook";
 const WA_PATH = "/whatsapp/webhook";
 
-// ---------------- SMALL HELPERS ----------------
-const memoryFallback = new Map(); // if Supabase is not configured / fails
+// Friend mode LOCKED ✅
+const FRIEND_MODE_LOCKED = true;
 
-function nowISO() {
-  return new Date().toISOString();
-}
+// Emoji behavior (subtle, not childish)
+const EMOJI = {
+  en: ["🙂", "✨", "🤍", "🫶"],
+  it: ["🙂", "✨", "🤍", "🫶"],
+  de: ["🙂", "✨", "🤍", "🫶"],
+};
 
-function safeLower(s = "") {
-  return String(s).toLowerCase();
-}
-
-// lightweight language guess from text (good enough for IT/EN/DE)
-function guessLangFromText(text = "") {
-  const t = safeLower(text);
-
-  // If user is clearly writing German
-  const deHints = [" und ", " ich ", " nicht ", " danke", " bitte", " schön", " gerade", " heute", " wirklich", " einfach"];
-  const itHints = [" che ", " non ", " grazie", " per ", " come ", " oggi", " davvero", " però", " perché", " allora", " ciao"];
-  const enHints = [" the ", " and ", " you ", " thanks", " please", " today", " really", " just", " because", " hello", " sup"];
-
-  const score = (arr) => arr.reduce((acc, w) => (t.includes(w) ? acc + 1 : acc), 0);
-
-  const sDE = score(deHints);
-  const sIT = score(itHints);
-  const sEN = score(enHints);
-
-  // default English if uncertain
-  if (sDE >= sIT && sDE >= sEN && sDE > 0) return "de";
-  if (sIT >= sDE && sIT >= sEN && sIT > 0) return "it";
-  if (sEN > 0) return "en";
-  return "en";
+function pick(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
 }
 
 function addEmoji(lang, text) {
-  // keep it light, friend-mode vibe, not forced
-  const emojis = {
-    en: ["🙂", "✨", "🤍", "😄", "👌"],
-    it: ["🙂", "✨", "🤍", "😄", "👌"],
-    de: ["🙂", "✨", "🤍", "😄", "👌"],
-  };
-
-  // If user used emojis, mirror slightly. If not, use only sometimes.
-  const userUsedEmoji = /[\u{1F300}-\u{1FAFF}]/u.test(text);
-  const chance = userUsedEmoji ? 0.7 : 0.25;
-
-  if (Math.random() > chance) return text;
-
-  const pick = emojis[lang] || emojis.en;
-  const e = pick[Math.floor(Math.random() * pick.length)];
-  // don’t emoji-bomb: one emoji at end
-  return `${text} ${e}`;
+  // keep it subtle: add at end only if not already ending with emoji/punctuation-heavy
+  const l = (lang || "en").toLowerCase();
+  const e = EMOJI[l] || EMOJI.en;
+  if (!text) return text;
+  if (/[🙂✨🤍🫶]$/.test(text.trim())) return text;
+  return `${text.trim()} ${pick(e)}`;
 }
 
-// Friend mode: ask questions ONLY when it helps. We implement as rule + prompt.
-function shouldAskQuestion(userText) {
-  const t = safeLower(userText);
-  // Only ask if user is vague/ambiguous or invites it
-  const triggers = [
-    "help me",
-    "what do you think",
-    "advice",
-    "should i",
-    "how do i",
-    "any ideas",
-    "i feel",
-    "i'm feeling",
-    "i am feeling",
-    "suggest",
-    "recommend",
-    "talk to me",
-  ];
-  return triggers.some((x) => t.includes(x));
+// -------------------- APP --------------------
+const app = express();
+app.use(express.json({ limit: "2mb" })); // needed for WhatsApp payloads
+
+// -------------------- SUPABASE (optional) --------------------
+let supa = null;
+async function initSupabase() {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE) return false;
+  try {
+    supa = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE, { auth: { persistSession: false } });
+    // quick check: select 1 row (table may be empty)
+    await supa.from(SUPABASE_TABLE).select("*").limit(1);
+    console.log("✅ Supabase connection OK");
+    return true;
+  } catch (e) {
+    console.log("⚠️ Supabase not ready:", e?.message || e);
+    supa = null;
+    return false;
+  }
 }
 
-// ---------------- SUPABASE PREFS ----------------
-const supabase =
-  SUPABASE_URL && SUPABASE_SERVICE_ROLE
-    ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE, { auth: { persistSession: false } })
-    : null;
+async function getPrefs(platform, userId) {
+  // default prefs
+  const base = { lang: null, friendMode: true };
 
-async function getPrefs(channel, userId) {
-  const key = `${channel}:${userId}`;
-
-  // default: friend mode locked ON, language auto
-  const defaults = { lang: null, friendModeLocked: true, friendMode: true, updatedAt: nowISO() };
-
-  if (!supabase) return { ...defaults, ...(memoryFallback.get(key) || {}) };
+  if (!supa) return base;
 
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supa
       .from(SUPABASE_TABLE)
-      .select("prefs")
-      .eq("id", key)
+      .select("*")
+      .eq("platform", platform)
+      .eq("user_id", userId)
       .maybeSingle();
 
-    if (error) throw error;
+    if (error) return base;
+    if (!data) return base;
 
-    const prefs = data?.prefs || {};
-    return { ...defaults, ...prefs };
-  } catch (e) {
-    // fallback
-    return { ...defaults, ...(memoryFallback.get(key) || {}) };
-  }
-}
-
-async function setPrefs(channel, userId, patch) {
-  const key = `${channel}:${userId}`;
-  const current = await getPrefs(channel, userId);
-  const merged = { ...current, ...patch, updatedAt: nowISO() };
-
-  if (!supabase) {
-    memoryFallback.set(key, merged);
-    return merged;
-  }
-
-  try {
-    const { error } = await supabase.from(SUPABASE_TABLE).upsert(
-      {
-        id: key,
-        prefs: merged,
-        updated_at: nowISO(),
-      },
-      { onConflict: "id" }
-    );
-    if (error) throw error;
-    return merged;
-  } catch (e) {
-    memoryFallback.set(key, merged);
-    return merged;
-  }
-}
-
-// ---------------- OPENAI CALL ----------------
-async function askHithAI({ userText, lang, friendMode = true }) {
-  if (!OPENAI_API_KEY) {
-    // fallback without OpenAI: still respond
     return {
-      it: "Sono qui. Dimmi pure 🙂",
-      en: "I’m here. Tell me what’s on your mind 🙂",
-      de: "Ich bin da. Sag mir, was dich beschäftigt 🙂",
-    }[lang || "en"];
+      lang: data.lang || null,
+      friendMode: FRIEND_MODE_LOCKED ? true : data.friend_mode ?? true,
+    };
+  } catch {
+    return base;
   }
+}
 
-  const systemByLang = {
-    en: `You are HITH, a warm, human, friendly chat companion.
-Friend mode is ON and LOCKED.
-Rules:
-- Reply in the same language as the user's message.
-- Use a friendly tone. Light emojis are allowed (1 max) but not forced.
-- Do NOT say you keep secrets or that things stay between us. If asked, be honest: you can’t guarantee confidentiality.
-- Ask a question ONLY if it clearly helps the conversation or makes it more interesting. Otherwise, just respond.
-- Keep answers natural and not robotic.`,
-    it: `Sei HITH, un compagno di chat caldo, umano, amichevole.
-Modalità amica è ATTIVA e BLOCCATA.
-Regole:
-- Rispondi nella stessa lingua del messaggio dell’utente.
-- Tono amichevole. Emoji leggere consentite (max 1) ma non obbligatorie.
-- NON dire che puoi mantenere segreti o che resta “tra noi”. Se te lo chiedono, sii onesto: non puoi garantire riservatezza.
-- Fai una domanda SOLO se aiuta davvero la conversazione o la rende più interessante. Altrimenti rispondi e basta.
-- Evita tono robotico.`,
-    de: `Du bist HITH, ein warmer, menschlicher, freundlicher Chat-Begleiter.
-Freund-Modus ist AN und GESPERRT.
-Regeln:
-- Antworte in derselben Sprache wie die Nachricht des Nutzers.
-- Freundlicher Ton. Leichte Emojis sind erlaubt (max 1), aber nicht erzwungen.
-- Sage NICHT, dass du Geheimnisse bewahrst oder dass es “zwischen uns” bleibt. Wenn gefragt, sei ehrlich: du kannst keine Vertraulichkeit garantieren.
-- Stelle nur dann eine Frage, wenn sie wirklich hilft oder das Gespräch interessanter macht. Sonst einfach antworten.
-- Nicht robotisch klingen.`,
+async function setPrefs(platform, userId, patch) {
+  if (!supa) return false;
+  const payload = {
+    platform,
+    user_id: userId,
+    lang: patch.lang ?? null,
+    friend_mode: FRIEND_MODE_LOCKED ? true : patch.friendMode ?? true,
+    updated_at: new Date().toISOString(),
   };
 
-  const model = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  try {
+    await supa.from(SUPABASE_TABLE).upsert(payload, { onConflict: "platform,user_id" });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
-  // Question gating: if not needed, instruct model to avoid.
-  const askQ = shouldAskQuestion(userText);
+// -------------------- LANGUAGE GUESS --------------------
+function guessLangFromText(text = "") {
+  const t = text.toLowerCase();
+  if (/[äöüß]/.test(t) || /\b(und|nicht|ich|du|wir|danke)\b/.test(t)) return "de";
+  if (/\b(ciao|grazie|perché|oggi|bene|allora|non)\b/.test(t)) return "it";
+  return "en";
+}
 
-  const extra = askQ
-    ? ""
-    : "\nImportant: Do not end with a question. Do not ask follow-ups.";
+// -------------------- CORE REPLY LOGIC --------------------
+async function generateReply({ userText, lang, platform }) {
+  // Friend-mode rules:
+  // - be warm + natural
+  // - ask questions ONLY if relevant or makes convo interesting
+  // - emojis allowed (subtle)
+  const clean = (userText || "").trim();
+  if (!clean) return { text: addEmoji(lang, "I’m here. Say something and I’ll stay with you.") };
 
-  const system = (systemByLang[lang] || systemByLang.en) + extra;
+  // Mini built-in responses (fast)
+  const lower = clean.toLowerCase();
+
+  // quick “name” responses (use your brand)
+  if (lower === "what is your name?" || lower === "what's your name?" || lower === "chi sei?" || lower === "wie heißt du?") {
+    const t =
+      lang === "it"
+        ? "I’m HITH. I’m here with you — like a quiet friend that actually listens."
+        : lang === "de"
+        ? "Ich bin HITH. Ich bin hier — wie ein ruhiger Freund, der wirklich zuhört."
+        : "I’m HITH. I’m here — like a calm friend who actually listens.";
+    return { text: addEmoji(lang, t) };
+  }
+
+  // If no OpenAI, fallback
+  if (!OPENAI_API_KEY) {
+    const t =
+      lang === "it"
+        ? "Ti ascolto. Dimmi cosa hai in mente, e lo prendiamo con calma."
+        : lang === "de"
+        ? "Ich höre dir zu. Sag mir, was dich beschäftigt — wir nehmen es ruhig."
+        : "I’m listening. Tell me what’s on your mind — we’ll take it slowly.";
+    // Only ask a question if it helps
+    const q =
+      lang === "it"
+        ? "Cosa ti pesa di più oggi?"
+        : lang === "de"
+        ? "Was wiegt heute am meisten auf dir?"
+        : "What’s weighing on you most today?";
+    return { text: addEmoji(lang, `${t} ${q}`) };
+  }
+
+  // OpenAI call (minimal)
+  const system = `
+You are HITH in FRIEND MODE (LOCKED ON).
+Tone: warm, human, natural. Not clinical.
+Emojis: allowed, subtle, max 1-2 per message.
+Questions: ask ONLY if relevant to the conversation or it makes it more interesting.
+Never claim you can keep secrets perfectly; be honest that chats may be stored.
+Language: reply in ${lang}.
+Keep it concise, but not cold.
+`;
+
+  const body = {
+    model: "gpt-4.1-mini",
+    messages: [
+      { role: "system", content: system.trim() },
+      { role: "user", content: clean },
+    ],
+    temperature: 0.8,
+  };
 
   const resp = await fetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
       "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
     },
-    body: JSON.stringify({
-      model,
-      temperature: 0.7,
-      messages: [
-        { role: "system", content: system },
-        { role: "user", content: userText },
-      ],
-    }),
+    body: JSON.stringify(body),
   });
 
-  if (!resp.ok) {
-    const txt = await resp.text().catch(() => "");
-    console.error("OpenAI error:", resp.status, txt);
-    return {
-      it: "Ok, ci sono. Parliamone 🙂",
-      en: "Okay, I’m here. Let’s talk 🙂",
-      de: "Okay, ich bin da. Lass uns reden 🙂",
-    }[lang || "en"];
+  const json = await resp.json();
+  const out = json?.choices?.[0]?.message?.content?.trim();
+
+  if (!out) {
+    const t =
+      lang === "it"
+        ? "Mi è saltata una parola. Riprova a dirmelo — sono qui."
+        : lang === "de"
+        ? "Mir ist gerade ein Wort weggerutscht. Sag’s mir nochmal — ich bin da."
+        : "I dropped a word there. Tell me again — I’m here.";
+    return { text: addEmoji(lang, t) };
   }
 
-  const data = await resp.json();
-  const out = data?.choices?.[0]?.message?.content?.trim();
-  return out || "…";
+  return { text: addEmoji(lang, out) };
 }
 
+// -------------------- TELEGRAM --------------------
+let bot = null;
 
-// ---------------- WHATSAPP (META) ----------------
+function initTelegram() {
+  if (!TELEGRAM_BOT_TOKEN) {
+    console.log("⚠️ Missing TELEGRAM_BOT_TOKEN (Telegram will not work)");
+    return;
+  }
+
+  bot = new Telegraf(TELEGRAM_BOT_TOKEN);
+
+  bot.on("text", async (ctx) => {
+    try {
+      const fromId = String(ctx.from?.id || "");
+      const text = ctx.message?.text || "";
+
+      const prefs = await getPrefs("tg", fromId);
+      const lang = prefs.lang || guessLangFromText(text);
+
+      // friend mode locked on
+      await setPrefs("tg", fromId, { lang, friendMode: true });
+
+      const out = await generateReply({
+        userText: text,
+        lang,
+        platform: "telegram",
+      });
+
+      await ctx.reply(out.text);
+    } catch (e) {
+      console.error("Telegram handler error:", e?.message || e);
+    }
+  });
+
+  // Webhook callback
+  app.use(TG_PATH, (req, res) => bot.webhookCallback(TG_PATH)(req, res));
+}
+
+// set webhook on startup
+async function setupTelegramWebhook() {
+  if (!bot || !PUBLIC_URL) return;
+  const url = `${PUBLIC_URL}${TG_PATH}`;
+
+  try {
+    // telegraf has helper
+    await bot.telegram.setWebhook(url, { drop_pending_updates: true });
+    console.log("✅ Telegram webhook set:", url);
+  } catch (e) {
+    console.log("⚠️ Telegram setWebhook failed:", e?.message || e);
+  }
+}
+
+// -------------------- WHATSAPP (META) --------------------
 
 // Verification endpoint (Meta calls this)
 app.get(WA_PATH, (req, res) => {
@@ -294,45 +317,21 @@ app.post(WA_PATH, async (req, res) => {
     const msg = value?.messages?.[0];
     if (!msg) return;
 
-    const from = msg.from; // WA user phone number (string)
+    const from = msg.from; // WhatsApp user number (string)
     const text = msg?.text?.body || "";
 
     const prefs = await getPrefs("wa", from);
+    const lang = prefs.lang || guessLangFromText(text);
 
-    // language: follow user text unless user forced a lang
-    const detected = guessLangFromText(text);
-    const lang = prefs.lang || detected;
+    await setPrefs("wa", from, { lang, friendMode: true });
 
-    // Friend mode is locked ON
-    if (!prefs.friendModeLocked || prefs.friendMode !== true) {
-      await setPrefs("wa", from, { friendModeLocked: true, friendMode: true });
-    }
+    const out = await generateReply({
+      userText: text,
+      lang,
+      platform: "whatsapp",
+    });
 
-    // Simple text commands for WA
-    if (safeLower(text).includes("lock friend mode") || safeLower(text).includes("blocca modalità amica")) {
-      await setPrefs("wa", from, { friendModeLocked: true, friendMode: true });
-      const confirm = {
-        it: "Modalità amica bloccata ✅",
-        en: "Friend mode locked ✅",
-        de: "Freund-Modus gesperrt ✅",
-      }[lang] || "Friend mode locked ✅";
-      await sendWhatsAppText(from, confirm);
-      return;
-    }
-
-    // secrets honesty
-    if (safeLower(text).includes("secret") || safeLower(text).includes("segreto") || safeLower(text).includes("geheim")) {
-      const honest = {
-        it: "Posso ascoltarti, ma non posso garantire riservatezza assoluta come una cassaforte. Se vuoi, dimmi solo ciò che ti fa sentire al sicuro 🙂",
-        en: "I can listen, but I can’t guarantee absolute confidentiality like a vault. Share only what feels safe 🙂",
-        de: "Ich kann zuhören, aber ich kann keine absolute Vertraulichkeit wie ein Tresor garantieren. Teile nur, was sich sicher anfühlt 🙂",
-      }[lang] || "I can listen, but I can’t guarantee absolute confidentiality like a vault. Share only what feels safe 🙂";
-      await sendWhatsAppText(from, honest);
-      return;
-    }
-
-    const out = await askHithAI({ userText: text, lang, friendMode: true });
-    await sendWhatsAppText(from, addEmoji(lang, out));
+    await sendWhatsAppText(from, out.text);
   } catch (e) {
     console.error("WhatsApp webhook error:", e?.message || e);
   }
@@ -340,7 +339,7 @@ app.post(WA_PATH, async (req, res) => {
 
 async function sendWhatsAppText(to, text) {
   if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_ID) {
-    console.warn("WhatsApp not configured (missing WHATSAPP_TOKEN / WHATSAPP_PHONE_ID)");
+    console.log("⚠️ WhatsApp not configured (missing WHATSAPP_TOKEN / WHATSAPP_PHONE_ID)");
     return;
   }
 
@@ -361,162 +360,51 @@ async function sendWhatsAppText(to, text) {
     body: JSON.stringify(payload),
   });
 
+  const j = await resp.json();
   if (!resp.ok) {
-    const t = await resp.text().catch(() => "");
-    console.error("WhatsApp send failed:", resp.status, t);
-  }
-}
-// ---------------- TELEGRAM ----------------
-let bot = null;
-
-function telegramMainKeyboard(lang = "en") {
-  const labels = {
-    it: { journal: "📙 Journal", progress: "📊 Progress", coach: "📌 Coach", sos: "⚡ SOS", invite: "🔗 Invite", settings: "⚙️ Impostazioni" },
-    en: { journal: "📙 Journal", progress: "📊 Progress", coach: "📌 Coach", sos: "⚡ SOS", invite: "🔗 Invite", settings: "⚙️ Settings" },
-    de: { journal: "📙 Journal", progress: "📊 Progress", coach: "📌 Coach", sos: "⚡ SOS", invite: "🔗 Invite", settings: "⚙️ Einstellungen" },
-  }[lang] || {
-    journal: "📙 Journal", progress: "📊 Progress", coach: "📌 Coach", sos: "⚡ SOS", invite: "🔗 Invite", settings: "⚙️ Settings"
-  };
-
-  return Markup.keyboard([
-    [labels.journal, labels.progress],
-    [labels.coach, labels.sos],
-    [labels.invite, labels.settings],
-  ]).resize();
-}
-
-function telegramSettingsInline() {
-  return Markup.inlineKeyboard([
-    [
-      Markup.button.callback("🇮🇹 IT", "SET_LANG_it"),
-      Markup.button.callback("🇬🇧 EN", "SET_LANG_en"),
-      Markup.button.callback("🇩🇪 DE", "SET_LANG_de"),
-    ],
-    [Markup.button.callback("🔒 Lock friend mode", "LOCK_FRIEND")],
-  ]);
-}
-
-async function setupTelegram() {
-  if (!TELEGRAM_BOT_TOKEN) {
-    console.warn("Missing TELEGRAM_BOT_TOKEN (Telegram will not work)");
-    return;
-  }
-
-  bot = new Telegraf(TELEGRAM_BOT_TOKEN);
-
-  bot.start(async (ctx) => {
-    const userId = String(ctx.from?.id);
-    const prefs = await getPrefs("tg", userId);
-    const lang = prefs.lang || guessLangFromText(ctx.message?.text || "") || "en";
-    await setPrefs("tg", userId, { friendMode: true, friendModeLocked: true });
-
-    const greet = {
-      it: "Ciao, sono Hith. Sono qui con te 🙂",
-      en: "Hey, I’m Hith. I’m here with you 🙂",
-      de: "Hey, ich bin Hith. Ich bin für dich da 🙂",
-    }[lang] || "Hey, I’m Hith. I’m here with you 🙂";
-
-    await ctx.reply(greet, telegramMainKeyboard(lang));
-  });
-
-  bot.action(/^SET_LANG_(it|en|de)$/, async (ctx) => {
-    const lang = ctx.match[1];
-    const userId = String(ctx.from?.id);
-    await setPrefs("tg", userId, { lang });
-    await ctx.answerCbQuery("Saved ✅");
-    await ctx.reply(
-      { it: "Lingua impostata ✅", en: "Language set ✅", de: "Sprache gesetzt ✅" }[lang],
-      telegramMainKeyboard(lang)
-    );
-  });
-
-  bot.action("LOCK_FRIEND", async (ctx) => {
-    const userId = String(ctx.from?.id);
-    const prefs = await setPrefs("tg", userId, { friendModeLocked: true, friendMode: true });
-    const lang = prefs.lang || "en";
-    await ctx.answerCbQuery("Locked ✅");
-    await ctx.reply(
-      { it: "Modalità amica bloccata ✅", en: "Friend mode locked ✅", de: "Freund-Modus gesperrt ✅" }[lang],
-      telegramMainKeyboard(lang)
-    );
-  });
-
-  bot.hears(["⚙️ Impostazioni", "⚙️ Settings", "⚙️ Einstellungen"], async (ctx) => {
-    await ctx.reply("Settings:", telegramSettingsInline());
-  });
-
-  bot.hears(["🔗 Invite", "🔗 Invita", "Invite"], async (ctx) => {
-    const username = ctx.me || "HITH";
-    await ctx.reply(`Invite a friend:\nhttps://t.me/${username}`);
-  });
-
-  // Main conversation handler
-  bot.on("text", async (ctx) => {
-    const userId = String(ctx.from?.id);
-    const text = String(ctx.message?.text || "");
-
-    const prefs = await getPrefs("tg", userId);
-
-    // language: always follow user message language unless user forced a lang
-    const detected = guessLangFromText(text);
-    const lang = prefs.lang || detected;
-
-    // Keep friend mode ON and locked
-    if (!prefs.friendModeLocked || prefs.friendMode !== true) {
-      await setPrefs("tg", userId, { friendModeLocked: true, friendMode: true });
-    }
-
-    // If user asks about secrets, be honest (override AI if needed)
-    if (safeLower(text).includes("secret") || safeLower(text).includes("segreto") || safeLower(text).includes("geheim")) {
-      const honest = {
-        it: "Posso ascoltarti, ma non posso garantire riservatezza assoluta come una cassaforte. Se vuoi, dimmi solo ciò che ti fa sentire al sicuro 🙂",
-        en: "I can listen, but I can’t guarantee absolute confidentiality like a vault. Share only what feels safe 🙂",
-        de: "Ich kann zuhören, aber ich kann keine absolute Vertraulichkeit wie ein Tresor garantieren. Teile nur, was sich sicher anfühlt 🙂",
-      }[lang] || "I can listen, but I can’t guarantee absolute confidentiality like a vault. Share only what feels safe 🙂";
-      return ctx.reply(honest);
-    }
-
-    const out = await askHithAI({ userText: text, lang, friendMode: true });
-    await ctx.reply(addEmoji(lang, out), telegramMainKeyboard(lang));
-  });
-
-  // Express route for webhook
-  app.use(TG_PATH, bot.webhookCallback(TG_PATH));
-
-  // Set webhook on boot
-  if (!PUBLIC_URL) {
-    console.warn("Missing PUBLIC_URL; cannot set Telegram webhook automatically.");
-  } else {
-    const webhookURL = `${PUBLIC_URL}${TG_PATH}`;
-    try {
-      // Telegraf helper
-      await bot.telegram.setWebhook(webhookURL, { drop_pending_updates: true });
-      console.log("Telegram webhook set:", webhookURL);
-    } catch (e) {
-      console.error("Telegram setWebhook failed:", e?.message || e);
-    }
+    console.log("WhatsApp send failed:", j);
   }
 }
 
-// ---------------- HEALTH ----------------
+// -------------------- HEALTH --------------------
 app.get("/", (req, res) => {
   res.status(200).send("HITH is alive ✅");
 });
 
-// ---------------- BOOT ----------------
-app.listen(PORT, async () => {
-  console.log("Server listening on", PORT);
-  console.log("PUBLIC_URL base:", PUBLIC_URL || "(missing)");
-
-  if (supabase) {
-    // best-effort test
-    try {
-      await supabase.from(SUPABASE_TABLE).select("id").limit(1);
-      console.log("Supabase connection OK");
-    } catch (e) {
-      console.warn("Supabase test failed (still ok, will fallback):", e?.message || e);
-    }
-  }
-
-  await setupTelegram();
+app.get("/debug", (req, res) => {
+  res.json({
+    ok: true,
+    publicUrl: PUBLIC_URL,
+    telegram: {
+      enabled: !!TELEGRAM_BOT_TOKEN,
+      path: TG_PATH,
+      webhook: PUBLIC_URL ? `${PUBLIC_URL}${TG_PATH}` : null,
+    },
+    whatsapp: {
+      enabled: !!(WHATSAPP_TOKEN && WHATSAPP_PHONE_ID && WHATSAPP_VERIFY_TOKEN),
+      path: WA_PATH,
+      callback: PUBLIC_URL ? `${PUBLIC_URL}${WA_PATH}` : null,
+    },
+  });
 });
+
+// -------------------- START --------------------
+(async function start() {
+  await initSupabase();
+
+  initTelegram();
+
+  app.listen(PORT, async () => {
+    console.log(`🚀 Server listening on ${PORT}`);
+    console.log("🌐 PUBLIC_URL base:", PUBLIC_URL || "(missing)");
+
+    console.log("📌 WhatsApp webhook path:", WA_PATH);
+    console.log("📌 Telegram webhook path:", TG_PATH);
+
+    if (bot) {
+      await setupTelegramWebhook();
+    } else {
+      console.log("⚠️ Telegram disabled (no token).");
+    }
+  });
+})();
