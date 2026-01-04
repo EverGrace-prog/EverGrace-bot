@@ -273,9 +273,18 @@ function initTelegram() {
       console.error("Telegram handler error:", e?.message || e);
     }
   });
+// 🔹 TELEGRAM WEBHOOK ENDPOINT (EXPRESS)
+app.post(TG_PATH, async (req, res) => {
+  try {
+    await bot.handleUpdate(req.body);
+    res.sendStatus(200);
+  } catch (e) {
+    console.error("Telegram webhook error:", e?.message || e);
+    res.sendStatus(500);
+  }
+});
 
   // Webhook callback
-  app.use(TG_PATH, (req, res) => bot.webhookCallback(TG_PATH)(req, res));
 }
 
 // set webhook on startup
