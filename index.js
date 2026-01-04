@@ -80,6 +80,10 @@ function addEmoji(lang, text) {
 // -------------------- APP --------------------
 const app = express();
 app.use(express.json({ limit: "2mb" })); // needed for WhatsApp payloads
+app.use((req, res, next) => {
+  console.log("INCOMING:", req.method, req.path);
+  next();
+});
 
 // -------------------- SUPABASE (optional) --------------------
 let supa = null;
