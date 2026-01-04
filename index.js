@@ -76,10 +76,35 @@ function addEmoji(lang, text) {
   if (/[🙂✨🤍🫶]$/.test(text.trim())) return text;
   return `${text.trim()} ${pick(e)}`;
 }
+const MEMORY = new Map(); // key -> array of {role, content}
+
+function memKey(platform, userId) {
+  return `${platform}:${userId}`;
+}
+
+function getMemory(platform, userId, max = 8) {
+  const k = memKey(platform, userId);
+  const arr = MEMORY.get(k) || [];
+  return arr.slice(-max);
+}
+
+function pushMemory(platform, userId, role, content, max = 12) {
+  const k = memKey(platform, userId);
+  const arr = MEMORY.get(k) || [];
+  arr.push({ role, content });
+  MEMORY.set(k, arr.slice(-max));
+}
 
 // -------------------- APP --------------------
 const app = express();
 app.use(express.json({ limit: "2mb" })); // needed for WhatsApp payloads
+// Log every webhook hit (super useful)
+app.use((req, res, next) => {
+  if (req.path === "/tg-webhook" || req.path === "/whatsapp/webhook") {
+    console.log("📥 INCOMING", req.method, req.path);
+  }
+  next();
+});
 app.use((req, res, next) => {
   console.log("INCOMING:", req.method, req.path);
   next();
@@ -155,27 +180,44 @@ function guessLangFromText(text = "") {
 }
 
 // -------------------- CORE REPLY LOGIC --------------------
-async function generateReply({ userText, lang, platform }) {
-  // Friend-mode rules:
-  // - be warm + natural
-  // - ask questions ONLY if relevant or makes convo interesting
-  // - emojis allowed (subtle)
+async function generateReply({ userText, lang, platform, userId }) {
   const clean = (userText || "").trim();
-  if (!clean) return { text: addEmoji(lang, "I’m here. Say something and I’ll stay with you.") };
 
-  // Mini built-in responses (fast)
-  const lower = clean.toLowerCase();
+  const system = `
+You are HITH in FRIEND MODE (LOCKED ON).
+Tone: warm, human, natural.
+Emojis: subtle.
+Language: reply in ${lang}.
+`;
 
-  // quick “name” responses (use your brand)
-  if (lower === "what is your name?" || lower === "what's your name?" || lower === "chi sei?" || lower === "wie heißt du?") {
-    const t =
-      lang === "it"
-        ? "I’m HITH. I’m here with you — like a quiet friend that actually listens."
-        : lang === "de"
-        ? "Ich bin HITH. Ich bin hier — wie ein ruhiger Freund, der wirklich zuhört."
-        : "I’m HITH. I’m here — like a calm friend who actually listens.";
-    return { text: addEmoji(lang, t) };
-  }
+  // ⬇️ INCOLLA QUI
+  const history = getMemory(platform, userId, 8);
+
+  const body = {
+    model: "gpt-4.1-mini",
+    messages: [
+      { role: "system", content: system.trim() },
+      ...history,
+      { role: "user", content: clean },
+    ],
+    temperature: 0.8,
+  };
+
+  const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  const json = await resp.json();
+  const out = json?.choices?.[0]?.message?.content?.trim();
+
+  return { text: addEmoji(lang, out || "I’m here.") };
+}
+
 
   // If no OpenAI, fallback
   if (!OPENAI_API_KEY) {
@@ -248,6 +290,15 @@ function initTelegram() {
     console.log("⚠️ Missing TELEGRAM_BOT_TOKEN (Telegram will not work)");
     return;
   }
+app.get("/tg-info", async (req, res) => {
+  try {
+    if (!bot) return res.status(200).json({ ok: false, error: "Telegram bot not initialized" });
+    const info = await bot.telegram.getWebhookInfo();
+    return res.status(200).json({ ok: true, info });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: e?.message || String(e) });
+  }
+});
 
   bot = new Telegraf(TELEGRAM_BOT_TOKEN);
 
@@ -261,30 +312,26 @@ function initTelegram() {
 
       // friend mode locked on
       await setPrefs("tg", fromId, { lang, friendMode: true });
+pushMemory("telegram", fromId, "user", text);
 
       const out = await generateReply({
-        userText: text,
-        lang,
-        platform: "telegram",
-      });
+  userText: text,
+  lang,
+  platform: "telegram",
+  userId: fromId,
+});
+
 
       await ctx.reply(out.text);
     } catch (e) {
       console.error("Telegram handler error:", e?.message || e);
     }
   });
-// 🔹 TELEGRAM WEBHOOK ENDPOINT (EXPRESS)
-app.post(TG_PATH, async (req, res) => {
-  try {
-    await bot.handleUpdate(req.body);
-    res.sendStatus(200);
-  } catch (e) {
-    console.error("Telegram webhook error:", e?.message || e);
-    res.sendStatus(500);
-  }
-});
+pushMemory("telegram", fromId, "assistant", out.text);
 
   // Webhook callback
+  app.use(bot.webhookCallback(TG_PATH));
+
 }
 
 // set webhook on startup
