@@ -269,6 +269,8 @@ function initTelegram() {
   }
 
   bot = new Telegraf(TELEGRAM_BOT_TOKEN);
+// Webhook endpoint (MUST return 200)
+app.post(TG_PATH, bot.webhookCallback(TG_PATH));
 
   bot.on("text", async (ctx) => {
     try {
