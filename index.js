@@ -9,14 +9,15 @@
  *   TELEGRAM_BOT_TOKEN      <telegram token>
  *   OPENAI_API_KEY          <optional, but needed for AI replies>
  *
- *   WHATSAPP_TOKEN          <Meta permanent/temporary access token>
+ *   WHATSAPP_TOKEN          <Meta access token>
  *   WHATSAPP_PHONE_ID       <WhatsApp phone number id>
- *   WHATSAPP_VERIFY_TOKEN   <your chosen verify string, same as in Meta dashboard>
+ *   WHATSAPP_VERIFY_TOKEN   <verify string used in Meta dashboard>
  *
- * Optional Supabase (prefs persistence):
+ * Supabase (recommended for permanent memory + prefs):
  *   SUPABASE_URL
  *   SUPABASE_SERVICE_ROLE   (recommended) OR SUPABASE_KEY
  *   SUPABASE_TABLE          (default: hith_prefs)
+ *   SUPABASE_MEMORY_TABLE   (default: hith_memory)
  */
 
 import express from "express";
@@ -31,6 +32,7 @@ const PUBLIC_URL = String(process.env.PUBLIC_URL || "")
   .replace(/\/+$/, ""); // base only, no trailing slash
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
+const OPENAI_MODEL = process.env.OPENAI_MODEL || "gpt-4.1-mini";
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || "";
 
@@ -38,10 +40,12 @@ const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID || "";
 const WHATSAPP_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || "";
 
-// Supabase (optional)
+// Supabase
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
-const SUPABASE_SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_KEY || "";
+const SUPABASE_SERVICE_ROLE =
+  process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_KEY || "";
 const SUPABASE_TABLE = process.env.SUPABASE_TABLE || "hith_prefs";
+const SUPABASE_MEMORY_TABLE = process.env.SUPABASE_MEMORY_TABLE || "hith_memory";
 
 // -------------------- CONSTANTS --------------------
 const TG_PATH = "/tg-webhook";
@@ -59,8 +63,6 @@ async function safeFetch(url, options) {
 
 // -------------------- APP --------------------
 const app = express();
-
-// WhatsApp needs JSON body
 app.use(express.json({ limit: "2mb" }));
 
 // Log webhook hits (debug gold)
@@ -70,24 +72,6 @@ app.use((req, res, next) => {
   }
   next();
 });
-
-// -------------------- MEMORY (in-memory; resets on redeploy) --------------------
-const MEMORY = new Map(); // key -> array of { role, content }
-
-function memKey(platform, userId) {
-  return `${platform}:${userId}`;
-}
-function getMemory(platform, userId, max = 8) {
-  const arr = MEMORY.get(memKey(platform, userId)) || [];
-  return arr.slice(-max);
-}
-function pushMemory(platform, userId, role, content, max = 16) {
-  if (!userId) return;
-  const k = memKey(platform, userId);
-  const arr = MEMORY.get(k) || [];
-  arr.push({ role, content: String(content || "") });
-  MEMORY.set(k, arr.slice(-max));
-}
 
 // -------------------- EMOJI (subtle) --------------------
 const EMOJI = {
@@ -109,7 +93,7 @@ function addEmoji(lang, text) {
   return `${t} ${pick(e)}`;
 }
 
-// -------------------- SUPABASE (optional) --------------------
+// -------------------- SUPABASE (prefs + permanent memory) --------------------
 let supa = null;
 
 async function initSupabase() {
@@ -166,11 +150,76 @@ async function setPrefs(platform, userId, patch) {
   };
 
   try {
-    await supa.from(SUPABASE_TABLE).upsert(payload, { onConflict: "platform,user_id" });
+    await supa.from(SUPABASE_TABLE).upsert(payload, {
+      onConflict: "platform,user_id",
+    });
     return true;
   } catch {
     return false;
   }
+}
+
+// ---------- Permanent memory in Supabase (fallback to in-memory if needed)
+const MEMORY = new Map(); // fallback only (resets on redeploy)
+
+function memKey(platform, userId) {
+  return `${platform}:${userId}`;
+}
+
+async function getMemory(platform, userId, max = 10) {
+  if (!userId) return [];
+
+  // Supabase permanent memory
+  if (supa) {
+    try {
+      const { data } = await supa
+        .from(SUPABASE_MEMORY_TABLE)
+        .select("role, content, created_at")
+        .eq("platform", platform)
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(max);
+
+      const rows = (data || []).reverse(); // return oldest -> newest
+      return rows.map((r) => ({
+        role: r.role,
+        content: r.content,
+      }));
+    } catch {
+      // fall through to in-memory
+    }
+  }
+
+  // in-memory fallback
+  const arr = MEMORY.get(memKey(platform, userId)) || [];
+  return arr.slice(-max);
+}
+
+async function pushMemory(platform, userId, role, content, maxFallback = 20) {
+  if (!userId) return;
+  const c = String(content || "").trim();
+  if (!c) return;
+
+  // Supabase permanent memory
+  if (supa) {
+    try {
+      await supa.from(SUPABASE_MEMORY_TABLE).insert({
+        platform,
+        user_id: userId,
+        role,
+        content: c,
+      });
+      return;
+    } catch {
+      // fall through
+    }
+  }
+
+  // in-memory fallback
+  const k = memKey(platform, userId);
+  const arr = MEMORY.get(k) || [];
+  arr.push({ role, content: c });
+  MEMORY.set(k, arr.slice(-maxFallback));
 }
 
 // -------------------- LANGUAGE GUESS --------------------
@@ -185,9 +234,10 @@ function guessLangFromText(text = "") {
 async function generateReply({ userText, lang, platform, userId }) {
   const clean = (userText || "").trim();
 
-  if (!clean) return { text: addEmoji(lang, "I’m here. Say something and I’ll stay with you.") };
+  if (!clean) {
+    return { text: addEmoji(lang, "I’m here. Say something and I’ll stay with you.") };
+  }
 
-  // ultra-fast built-in edge cases
   const lower = clean.toLowerCase();
   if (
     lower === "what is your name?" ||
@@ -213,7 +263,6 @@ async function generateReply({ userText, lang, platform, userId }) {
         ? "Ich höre dir zu. Sag mir, was dich beschäftigt — wir nehmen es ruhig."
         : "I’m listening. Tell me what’s on your mind — we’ll take it slowly.";
 
-    // only one gentle question, not repeated
     const q =
       lang === "it"
         ? "Vuoi raccontarmi solo una frase su come ti senti?"
@@ -234,10 +283,10 @@ Language: reply in ${lang}.
 Keep it concise but human.
 `.trim();
 
-  const history = getMemory(platform, userId, 8);
+  const history = await getMemory(platform, userId, 10);
 
   const body = {
-    model: "gpt-4.1-mini",
+    model: OPENAI_MODEL,
     messages: [{ role: "system", content: system }, ...history, { role: "user", content: clean }],
     temperature: 0.8,
   };
@@ -269,8 +318,6 @@ function initTelegram() {
   }
 
   bot = new Telegraf(TELEGRAM_BOT_TOKEN);
-// Webhook endpoint (MUST return 200)
-app.post(TG_PATH, bot.webhookCallback(TG_PATH));
 
   bot.on("text", async (ctx) => {
     try {
@@ -282,8 +329,7 @@ app.post(TG_PATH, bot.webhookCallback(TG_PATH));
 
       await setPrefs("tg", fromId, { lang, friendMode: true });
 
-      // ✅ memory in
-      pushMemory("telegram", fromId, "user", text);
+      await pushMemory("telegram", fromId, "user", text);
 
       const out = await generateReply({
         userText: text,
@@ -292,8 +338,7 @@ app.post(TG_PATH, bot.webhookCallback(TG_PATH));
         userId: fromId,
       });
 
-      // ✅ memory out
-      pushMemory("telegram", fromId, "assistant", out.text);
+      await pushMemory("telegram", fromId, "assistant", out.text);
 
       await ctx.reply(out.text);
     } catch (e) {
@@ -301,8 +346,8 @@ app.post(TG_PATH, bot.webhookCallback(TG_PATH));
     }
   });
 
-  // ✅ Telegram webhook endpoint
-  app.use(TG_PATH, bot.webhookCallback(TG_PATH));
+  // ✅ Telegram webhook endpoint (ONLY ONCE)
+  app.post(TG_PATH, bot.webhookCallback(TG_PATH));
 }
 
 async function setupTelegramWebhook() {
@@ -368,8 +413,7 @@ app.post(WA_PATH, async (req, res) => {
 
     await setPrefs("wa", from, { lang, friendMode: true });
 
-    // ✅ memory in
-    pushMemory("whatsapp", from, "user", text);
+    await pushMemory("whatsapp", from, "user", text);
 
     const out = await generateReply({
       userText: text,
@@ -378,8 +422,7 @@ app.post(WA_PATH, async (req, res) => {
       userId: from,
     });
 
-    // ✅ memory out
-    pushMemory("whatsapp", from, "assistant", out.text);
+    await pushMemory("whatsapp", from, "assistant", out.text);
 
     await sendWhatsAppText(from, out.text);
   } catch (e) {
@@ -433,13 +476,17 @@ app.get("/debug", (req, res) => {
       path: WA_PATH,
       callback: PUBLIC_URL ? `${PUBLIC_URL}${WA_PATH}` : null,
     },
+    supabase: {
+      enabled: !!supa,
+      prefsTable: SUPABASE_TABLE,
+      memoryTable: SUPABASE_MEMORY_TABLE,
+    },
   });
 });
 
 // -------------------- START --------------------
 (async function start() {
   await initSupabase();
-
   initTelegram();
 
   app.listen(PORT, async () => {
@@ -447,7 +494,6 @@ app.get("/debug", (req, res) => {
     console.log("🌐 PUBLIC_URL base:", PUBLIC_URL || "(missing)");
     console.log("📌 Telegram webhook path:", TG_PATH);
     console.log("📌 WhatsApp webhook path:", WA_PATH);
-
     if (bot) await setupTelegramWebhook();
   });
 })();
