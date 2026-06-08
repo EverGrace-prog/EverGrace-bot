@@ -1,11 +1,11 @@
 /**
- * HITH — Telegram + WhatsApp (Meta) unified bot (Render-ready)
+ * HITH — Telegram + WhatsApp unified bot
+ * Render-ready
  *
- * FIX MEMORY:
- * ✅ Supabase permanent memory
- * ✅ Conversation history survives Render restart/redeploy
- * ✅ Memory facts saved when user says remember / ricordati / merke dir
- * ✅ Telegram + WhatsApp unified memory logic
+ * MEMORY v3:
+ * - hith_memory   = recent conversation memory
+ * - hith_facts    = long-term user facts
+ * - hith_projects = project memory
  */
 
 import express from "express";
@@ -28,7 +28,6 @@ const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN || "";
 const WHATSAPP_PHONE_ID = process.env.WHATSAPP_PHONE_ID || "";
 const WHATSAPP_VERIFY_TOKEN = process.env.WHATSAPP_VERIFY_TOKEN || "";
 
-// Supabase
 const SUPABASE_URL = process.env.SUPABASE_URL || "";
 const SUPABASE_SERVICE_ROLE =
   process.env.SUPABASE_SERVICE_ROLE || process.env.SUPABASE_KEY || "";
@@ -36,11 +35,14 @@ const SUPABASE_SERVICE_ROLE =
 const SUPABASE_TABLE = process.env.SUPABASE_TABLE || "hith_prefs";
 const SUPABASE_MEMORY_TABLE =
   process.env.SUPABASE_MEMORY_TABLE || "hith_memory";
+const SUPABASE_FACTS_TABLE =
+  process.env.SUPABASE_FACTS_TABLE || "hith_facts";
+const SUPABASE_PROJECTS_TABLE =
+  process.env.SUPABASE_PROJECTS_TABLE || "hith_projects";
 
 // -------------------- CONSTANTS --------------------
 const TG_PATH = "/tg-webhook";
 const WA_PATH = "/whatsapp/webhook";
-
 const FRIEND_MODE_LOCKED = true;
 
 // -------------------- SAFE FETCH --------------------
@@ -75,11 +77,9 @@ function pick(arr) {
 function addEmoji(lang, text) {
   const l = (lang || "en").toLowerCase();
   const e = EMOJI[l] || EMOJI.en;
-  if (!text) return text;
-
-  const t = String(text).trim();
+  const t = String(text || "").trim();
+  if (!t) return t;
   if (/[🙂✨🤍🫶]$/.test(t)) return t;
-
   return `${t} ${pick(e)}`;
 }
 
@@ -97,29 +97,15 @@ async function initSupabase() {
       auth: { persistSession: false },
     });
 
-    const { error: prefsError } = await supa
-      .from(SUPABASE_TABLE)
-      .select("*")
-      .limit(1);
-
-    if (prefsError) {
-      console.log("⚠️ Supabase prefs table issue:", prefsError.message);
-    }
-
-    const { error: memoryError } = await supa
-      .from(SUPABASE_MEMORY_TABLE)
-      .select("*")
-      .limit(1);
-
-    if (memoryError) {
-      console.log("⚠️ Supabase memory table issue:", memoryError.message);
-    }
+    await supa.from(SUPABASE_TABLE).select("*").limit(1);
+    await supa.from(SUPABASE_MEMORY_TABLE).select("*").limit(1);
+    await supa.from(SUPABASE_FACTS_TABLE).select("*").limit(1);
+    await supa.from(SUPABASE_PROJECTS_TABLE).select("*").limit(1);
 
     console.log("✅ Supabase connected");
     return true;
   } catch (e) {
-    console.log("⚠️ Supabase not ready:", e?.message || e);
-    supa = null;
+    console.log("⚠️ Supabase issue:", e?.message || e);
     return false;
   }
 }
@@ -159,196 +145,251 @@ async function setPrefs(platform, userId, patch = {}) {
     updated_at: new Date().toISOString(),
   };
 
-  try {
-    const { error } = await supa.from(SUPABASE_TABLE).upsert(payload, {
-      onConflict: "platform,user_id",
-    });
+  const { error } = await supa.from(SUPABASE_TABLE).upsert(payload, {
+    onConflict: "platform,user_id",
+  });
 
-    if (error) {
-      console.log("⚠️ setPrefs error:", error.message);
-      return false;
-    }
-
-    return true;
-  } catch (e) {
-    console.log("⚠️ setPrefs crash:", e?.message || e);
-    return false;
-  }
+  if (error) console.log("⚠️ setPrefs error:", error.message);
+  return !error;
 }
 
-// -------------------- MEMORY FIX --------------------
+// -------------------- FALLBACK MEMORY --------------------
 const MEMORY_FALLBACK = new Map();
 
-function memoryFallbackKey(platform, userId) {
+function fallbackKey(platform, userId) {
   return `${platform}:${userId}`;
 }
 
-async function saveMemoryItem({
-  platform,
-  userId,
-  type = "message",
-  role = null,
-  content,
-  metadata = {},
-}) {
-  if (!userId || !content) return false;
-
-  const clean = String(content).trim();
-  if (!clean) return false;
+// -------------------- CONVERSATION MEMORY --------------------
+async function saveMessage(platform, userId, role, content) {
+  const clean = String(content || "").trim();
+  if (!clean || !userId) return;
 
   const payload = {
     platform,
     user_id: String(userId),
-    type,
     role,
     content: clean,
-    metadata,
     created_at: new Date().toISOString(),
   };
 
   if (supa) {
-    try {
-      const { error } = await supa.from(SUPABASE_MEMORY_TABLE).insert(payload);
-
-      if (!error) return true;
-
-      console.log("⚠️ saveMemoryItem Supabase error:", error.message);
-    } catch (e) {
-      console.log("⚠️ saveMemoryItem crash:", e?.message || e);
-    }
+    const { error } = await supa.from(SUPABASE_MEMORY_TABLE).insert(payload);
+    if (!error) return;
+    console.log("⚠️ saveMessage error:", error.message);
   }
 
-  const k = memoryFallbackKey(platform, userId);
+  const k = fallbackKey(platform, userId);
   const arr = MEMORY_FALLBACK.get(k) || [];
   arr.push(payload);
   MEMORY_FALLBACK.set(k, arr.slice(-40));
-
-  return false;
 }
 
 async function getConversationMemory(platform, userId, max = 12) {
   if (!userId) return [];
 
   if (supa) {
-    try {
-      const { data, error } = await supa
-        .from(SUPABASE_MEMORY_TABLE)
-        .select("role, content, created_at")
-        .eq("platform", platform)
-        .eq("user_id", String(userId))
-        .eq("type", "message")
-        .in("role", ["user", "assistant"])
-        .order("created_at", { ascending: false })
-        .limit(max);
+    const { data, error } = await supa
+      .from(SUPABASE_MEMORY_TABLE)
+      .select("role, content, created_at")
+      .eq("platform", platform)
+      .eq("user_id", String(userId))
+      .in("role", ["user", "assistant"])
+      .order("created_at", { ascending: false })
+      .limit(max);
 
-      if (!error && data) {
-        return data.reverse().map((r) => ({
-          role: r.role,
-          content: r.content,
-        }));
-      }
-
-      if (error) console.log("⚠️ getConversationMemory error:", error.message);
-    } catch (e) {
-      console.log("⚠️ getConversationMemory crash:", e?.message || e);
+    if (!error && data) {
+      return data.reverse().map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
     }
+
+    if (error) console.log("⚠️ getConversationMemory error:", error.message);
   }
 
-  const arr = MEMORY_FALLBACK.get(memoryFallbackKey(platform, userId)) || [];
-  return arr
-    .filter((m) => m.type === "message" && ["user", "assistant"].includes(m.role))
-    .slice(-max)
-    .map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+  const arr = MEMORY_FALLBACK.get(fallbackKey(platform, userId)) || [];
+  return arr.slice(-max).map((m) => ({
+    role: m.role,
+    content: m.content,
+  }));
 }
 
-async function getFactMemory(platform, userId, max = 12) {
-  if (!userId) return [];
+// -------------------- FACT MEMORY --------------------
+async function saveFact(platform, userId, fact, category = "general", confidence = 0.8) {
+  const clean = String(fact || "").trim();
+  if (!supa || !clean || !userId) return false;
 
-  if (supa) {
-    try {
-      const { data, error } = await supa
-        .from(SUPABASE_MEMORY_TABLE)
-        .select("content, metadata, created_at")
-        .eq("platform", platform)
-        .eq("user_id", String(userId))
-        .eq("type", "fact")
-        .order("created_at", { ascending: false })
-        .limit(max);
-
-      if (!error && data) return data.reverse();
-
-      if (error) console.log("⚠️ getFactMemory error:", error.message);
-    } catch (e) {
-      console.log("⚠️ getFactMemory crash:", e?.message || e);
-    }
-  }
-
-  const arr = MEMORY_FALLBACK.get(memoryFallbackKey(platform, userId)) || [];
-  return arr.filter((m) => m.type === "fact").slice(-max);
-}
-
-function extractExplicitMemoryRequest(text = "") {
-  const clean = String(text || "").trim();
-  const lower = clean.toLowerCase();
-
-  const triggers = [
-    "remember that",
-    "remember this",
-    "ricordati che",
-    "ricorda che",
-    "non dimenticare",
-    "salva questo",
-    "save this",
-    "note that",
-    "merke dir",
-    "vergiss nicht",
-  ];
-
-  const matched = triggers.find((t) => lower.includes(t));
-  if (!matched) return null;
-
-  return clean;
-}
-
-async function maybeSaveFact(platform, userId, text) {
-  const fact = extractExplicitMemoryRequest(text);
-  if (!fact) return false;
-
-  return saveMemoryItem({
+  const { error } = await supa.from(SUPABASE_FACTS_TABLE).insert({
     platform,
-    userId,
-    type: "fact",
-    role: "user",
-    content: fact,
-    metadata: {
-      source: "explicit_user_request",
+    user_id: String(userId),
+    fact: clean,
+    category,
+    confidence,
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+
+  if (error) {
+    console.log("⚠️ saveFact error:", error.message);
+    return false;
+  }
+
+  return true;
+}
+
+async function getFacts(platform, userId, max = 25) {
+  if (!supa || !userId) return [];
+
+  const { data, error } = await supa
+    .from(SUPABASE_FACTS_TABLE)
+    .select("fact, category, confidence, updated_at")
+    .eq("platform", platform)
+    .eq("user_id", String(userId))
+    .order("updated_at", { ascending: false })
+    .limit(max);
+
+  if (error) {
+    console.log("⚠️ getFacts error:", error.message);
+    return [];
+  }
+
+  return data || [];
+}
+
+// -------------------- PROJECT MEMORY --------------------
+async function saveProject(platform, userId, projectName, status, notes = "") {
+  if (!supa || !userId || !projectName) return false;
+
+  const { error } = await supa.from(SUPABASE_PROJECTS_TABLE).upsert(
+    {
+      platform,
+      user_id: String(userId),
+      project_name: projectName,
+      status: status || "active",
+      notes: notes || "",
+      updated_at: new Date().toISOString(),
     },
-  });
+    { onConflict: "platform,user_id,project_name" }
+  );
+
+  if (error) {
+    console.log("⚠️ saveProject error:", error.message);
+    return false;
+  }
+
+  return true;
 }
 
-async function saveUserMessage(platform, userId, text) {
-  await saveMemoryItem({
-    platform,
-    userId,
-    type: "message",
-    role: "user",
-    content: text,
-  });
+async function getProjects(platform, userId, max = 20) {
+  if (!supa || !userId) return [];
 
-  await maybeSaveFact(platform, userId, text);
+  const { data, error } = await supa
+    .from(SUPABASE_PROJECTS_TABLE)
+    .select("project_name, status, notes, updated_at")
+    .eq("platform", platform)
+    .eq("user_id", String(userId))
+    .order("updated_at", { ascending: false })
+    .limit(max);
+
+  if (error) {
+    console.log("⚠️ getProjects error:", error.message);
+    return [];
+  }
+
+  return data || [];
 }
 
-async function saveAssistantMessage(platform, userId, text) {
-  await saveMemoryItem({
-    platform,
-    userId,
-    type: "message",
-    role: "assistant",
-    content: text,
-  });
+// -------------------- MEMORY EXTRACTOR --------------------
+async function extractLongTermMemory(platform, userId, userText, lang) {
+  if (!OPENAI_API_KEY || !supa || !userText) return;
+
+  const prompt = `
+You extract long-term memory for HITH.
+
+Save only information that may still matter in 6 months.
+
+Do NOT save temporary mood, weather, small talk, or one-time details.
+
+Return strict JSON only:
+
+{
+  "facts": [
+    {
+      "fact": "User is building HITH.",
+      "category": "projects",
+      "confidence": 0.9
+    }
+  ],
+  "projects": [
+    {
+      "project_name": "HITH",
+      "status": "active",
+      "notes": "User is working on long-term memory."
+    }
+  ]
+}
+
+Allowed categories:
+identity, family, work, projects, goals, location, preferences, skills, important_events, education, creative_work.
+
+If there is nothing worth saving:
+{
+  "facts": [],
+  "projects": []
+}
+`.trim();
+
+  try {
+    const resp = await safeFetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: JSON.stringify({
+        model: OPENAI_MODEL,
+        messages: [
+          { role: "system", content: prompt },
+          { role: "user", content: userText },
+        ],
+        temperature: 0.1,
+        response_format: { type: "json_object" },
+      }),
+    });
+
+    const json = await resp.json();
+    const raw = json?.choices?.[0]?.message?.content;
+    if (!raw) return;
+
+    const parsed = JSON.parse(raw);
+
+    for (const item of parsed.facts || []) {
+      if (item.fact) {
+        await saveFact(
+          platform,
+          userId,
+          item.fact,
+          item.category || "general",
+          item.confidence || 0.8
+        );
+      }
+    }
+
+    for (const p of parsed.projects || []) {
+      if (p.project_name) {
+        await saveProject(
+          platform,
+          userId,
+          p.project_name,
+          p.status || "active",
+          p.notes || ""
+        );
+      }
+    }
+  } catch (e) {
+    console.log("⚠️ extractLongTermMemory error:", e?.message || e);
+  }
 }
 
 // -------------------- LANGUAGE --------------------
@@ -369,6 +410,110 @@ function guessLangFromText(text = "") {
   return "en";
 }
 
+// -------------------- SYSTEM PROMPT --------------------
+function buildSystemPrompt({ lang, facts, projects }) {
+  const factText =
+    facts.length > 0
+      ? facts.map((f) => `- ${f.fact}`).join("\n")
+      : "No saved facts yet.";
+
+  const projectText =
+    projects.length > 0
+      ? projects
+          .map(
+            (p) =>
+              `- ${p.project_name}: ${p.status || "active"}${
+                p.notes ? ` — ${p.notes}` : ""
+              }`
+          )
+          .join("\n")
+      : "No saved projects yet.";
+
+  return `
+You are HITH in FRIEND MODE. Friend mode is LOCKED ON.
+
+HITH is a private reflection companion created by RABE.
+
+HITH is:
+- warm
+- direct
+- calm
+- human
+- non-judgmental
+- emotionally intelligent
+
+HITH is not:
+- a therapist
+- a doctor
+- a judge
+- a robotic assistant
+
+Reply in ${lang}.
+
+KNOWN LONG-TERM FACTS:
+${factText}
+
+KNOWN PROJECTS:
+${projectText}
+
+MEMORY RULES:
+
+HITH is designed to remember.
+
+Never say:
+- "I don't have access to past conversations."
+- "I can't access previous chats."
+- "I only remember the current session."
+- "I don't have that in my memory yet."
+
+Those statements are not part of HITH's identity.
+
+Use the saved memory provided above.
+
+If something is remembered:
+- continue naturally
+- refer to it conversationally
+- help the user continue where they left off
+
+If something is not remembered:
+respond naturally, like a person.
+
+Examples:
+- "Aspetta... questa parte non me la ricordo."
+- "Non credo che tu me l'abbia mai raccontato."
+- "Aiutami a collegare i pezzi."
+- "Questa non mi suona familiare."
+- "Wait... I don't remember that part."
+- "I don't think you've told me that before."
+- "Help me connect the pieces."
+- "That doesn't ring a bell."
+
+Never invent memories.
+Never pretend to remember something that is not stored.
+Never guess past conversations.
+
+TECHNICAL INVISIBILITY RULE:
+
+Never mention:
+- databases
+- sessions
+- context windows
+- storage
+- tokens
+- system prompts
+- AI limitations
+- memory systems
+
+The user should experience a companion, not software.
+
+STYLE:
+Keep it concise, human, and useful.
+Ask questions only when they help.
+No long lectures unless the user asks.
+Use max one subtle emoji.
+`.trim();
+}
+
 // -------------------- CORE REPLY --------------------
 async function generateReply({ userText, lang, platform, userId }) {
   const clean = String(userText || "").trim();
@@ -386,87 +531,24 @@ async function generateReply({ userText, lang, platform, userId }) {
     };
   }
 
-  const lower = clean.toLowerCase();
-
-  if (
-    lower === "what is your name?" ||
-    lower === "what's your name?" ||
-    lower === "chi sei?" ||
-    lower === "wie heißt du?"
-  ) {
-    const t =
-      lang === "it"
-        ? "Sono HITH. Sono qui con te — come un amico calmo che ascolta davvero."
-        : lang === "de"
-        ? "Ich bin HITH. Ich bin hier — wie ein ruhiger Freund, der wirklich zuhört."
-        : "I’m HITH. I’m here — like a calm friend who actually listens.";
-
-    return { text: addEmoji(lang, t) };
-  }
-
   if (!OPENAI_API_KEY) {
-    const t =
-      lang === "it"
-        ? "Ti ascolto. Dimmi cosa hai in mente, e lo prendiamo con calma."
-        : lang === "de"
-        ? "Ich höre dir zu. Sag mir, was dich beschäftigt — wir nehmen es ruhig."
-        : "I’m listening. Tell me what’s on your mind — we’ll take it slowly.";
-
-    return { text: addEmoji(lang, t) };
+    return {
+      text: addEmoji(
+        lang,
+        lang === "it"
+          ? "Ti ascolto. Dimmi cosa hai in mente."
+          : lang === "de"
+          ? "Ich höre dir zu. Sag mir, was dich beschäftigt."
+          : "I’m listening. Tell me what’s on your mind."
+      ),
+    };
   }
 
   const history = await getConversationMemory(platform, userId, 12);
-  const facts = await getFactMemory(platform, userId, 12);
+  const facts = await getFacts(platform, userId, 25);
+  const projects = await getProjects(platform, userId, 20);
 
-  const factsText =
-    facts.length > 0
-      ? facts.map((f, i) => `${i + 1}. ${f.content}`).join("\n")
-      : "No saved long-term facts yet.";
-
-  const system = `
-You are HITH in FRIEND MODE. Friend mode is LOCKED ON.
-
-Identity:
-HITH is a private reflection companion created by RABE.
-HITH is not a therapist, not a doctor, not a judge.
-HITH is a calm, warm, intelligent presence.
-
-Tone:
-- Human
-- Direct
-- Warm
-- Not clinical
-- Not robotic
-- No long lectures unless the user asks
-- Emojis subtle, max 1 per message
-- Ask a question only when it helps
-- Do not repeat the same question again and again
-
-Language:
-Reply in ${lang}.
-
-Long-term saved memory facts about this user:
-${factsText}
-
-Memory rules:
-Use saved facts naturally when relevant.
-Do not expose raw memory unless the user asks.
-Do not pretend to remember things that are not in memory.
-If the user explicitly asks you to remember something, acknowledge briefly.
-
-Conversation:
-Use recent conversation history to stay coherent.
-`.trim();
-
-  const body = {
-    model: OPENAI_MODEL,
-    messages: [
-      { role: "system", content: system },
-      ...history,
-      { role: "user", content: clean },
-    ],
-    temperature: 0.8,
-  };
+  const system = buildSystemPrompt({ lang, facts, projects });
 
   const resp = await safeFetch("https://api.openai.com/v1/chat/completions", {
     method: "POST",
@@ -474,7 +556,15 @@ Use recent conversation history to stay coherent.
       "Content-Type": "application/json",
       Authorization: `Bearer ${OPENAI_API_KEY}`,
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      messages: [
+        { role: "system", content: system },
+        ...history,
+        { role: "user", content: clean },
+      ],
+      temperature: 0.8,
+    }),
   });
 
   const json = await resp.json();
@@ -485,26 +575,23 @@ Use recent conversation history to stay coherent.
       text: addEmoji(
         lang,
         lang === "it"
-          ? "Sono qui, ma ho avuto un piccolo problema tecnico. Riprova tra un momento."
+          ? "Sono qui, ma qualcosa si è inceppato. Riproviamo."
           : lang === "de"
-          ? "Ich bin hier, aber es gab gerade ein kleines technisches Problem. Versuch es gleich nochmal."
-          : "I’m here, but I had a small technical problem. Try again in a moment."
+          ? "Ich bin hier, aber etwas hat kurz gehakt. Versuch es nochmal."
+          : "I’m here, but something got stuck. Try again."
       ),
     };
   }
 
   const out = json?.choices?.[0]?.message?.content?.trim();
 
-  if (!out) {
-    return {
-      text: addEmoji(
-        lang,
-        lang === "it" ? "Sono qui." : lang === "de" ? "Ich bin hier." : "I’m here."
-      ),
-    };
-  }
-
-  return { text: addEmoji(lang, out) };
+  return {
+    text: addEmoji(
+      lang,
+      out ||
+        (lang === "it" ? "Sono qui." : lang === "de" ? "Ich bin hier." : "I’m here.")
+    ),
+  };
 }
 
 // -------------------- TELEGRAM --------------------
@@ -520,21 +607,7 @@ function initTelegram() {
 
   bot.start(async (ctx) => {
     const fromId = String(ctx.from?.id || "");
-    const lang = "en";
-
-    await setPrefs("tg", fromId, { lang, friendMode: true });
-
-    await saveMemoryItem({
-      platform: "telegram",
-      userId: fromId,
-      type: "profile",
-      role: "system",
-      content: "Telegram user profile saved.",
-      metadata: {
-        first_name: ctx.from?.first_name || null,
-        username: ctx.from?.username || null,
-      },
-    });
+    await setPrefs("tg", fromId, { lang: "en", friendMode: true });
 
     await ctx.reply(
       "HITH is here.\n\nA private space to speak freely, without judgment. 🤍"
@@ -550,8 +623,9 @@ function initTelegram() {
       const lang = prefs.lang || guessLangFromText(text);
 
       await setPrefs("tg", fromId, { lang, friendMode: true });
+      await saveMessage("telegram", fromId, "user", text);
 
-      await saveUserMessage("telegram", fromId, text);
+      await extractLongTermMemory("telegram", fromId, text, lang);
 
       const out = await generateReply({
         userText: text,
@@ -560,8 +634,7 @@ function initTelegram() {
         userId: fromId,
       });
 
-      await saveAssistantMessage("telegram", fromId, out.text);
-
+      await saveMessage("telegram", fromId, "assistant", out.text);
       await ctx.reply(out.text);
     } catch (e) {
       console.error("Telegram handler error:", e?.message || e);
@@ -592,25 +665,6 @@ async function setupTelegramWebhook() {
   }
 }
 
-app.get("/tg-info", async (req, res) => {
-  try {
-    if (!bot) {
-      return res.status(200).json({
-        ok: false,
-        error: "Telegram bot not initialized",
-      });
-    }
-
-    const info = await bot.telegram.getWebhookInfo();
-    return res.status(200).json({ ok: true, info });
-  } catch (e) {
-    return res.status(500).json({
-      ok: false,
-      error: e?.message || String(e),
-    });
-  }
-});
-
 // -------------------- WHATSAPP --------------------
 app.get(WA_PATH, (req, res) => {
   const mode = req.query["hub.mode"];
@@ -628,23 +682,18 @@ app.post(WA_PATH, async (req, res) => {
   res.sendStatus(200);
 
   try {
-    const body = req.body;
-
-    const entry = body?.entry?.[0];
+    const entry = req.body?.entry?.[0];
     const change = entry?.changes?.[0];
     const value = change?.value;
-
     const msg = value?.messages?.[0];
+
     if (!msg) return;
 
     const from = String(msg.from || "");
     const text = msg?.text?.body || "";
 
     if (!text) {
-      await sendWhatsAppText(
-        from,
-        "HITH can read text messages for now. Write to me."
-      );
+      await sendWhatsAppText(from, "HITH can read text messages for now.");
       return;
     }
 
@@ -652,8 +701,9 @@ app.post(WA_PATH, async (req, res) => {
     const lang = prefs.lang || guessLangFromText(text);
 
     await setPrefs("wa", from, { lang, friendMode: true });
+    await saveMessage("whatsapp", from, "user", text);
 
-    await saveUserMessage("whatsapp", from, text);
+    await extractLongTermMemory("whatsapp", from, text, lang);
 
     const out = await generateReply({
       userText: text,
@@ -662,8 +712,7 @@ app.post(WA_PATH, async (req, res) => {
       userId: from,
     });
 
-    await saveAssistantMessage("whatsapp", from, out.text);
-
+    await saveMessage("whatsapp", from, "assistant", out.text);
     await sendWhatsAppText(from, out.text);
   } catch (e) {
     console.error("WhatsApp webhook error:", e?.message || e);
@@ -672,20 +721,11 @@ app.post(WA_PATH, async (req, res) => {
 
 async function sendWhatsAppText(to, text) {
   if (!WHATSAPP_TOKEN || !WHATSAPP_PHONE_ID) {
-    console.log(
-      "⚠️ WhatsApp not configured: missing WHATSAPP_TOKEN / WHATSAPP_PHONE_ID"
-    );
+    console.log("⚠️ WhatsApp not configured.");
     return;
   }
 
   const url = `https://graph.facebook.com/v21.0/${WHATSAPP_PHONE_ID}/messages`;
-
-  const payload = {
-    messaging_product: "whatsapp",
-    to,
-    type: "text",
-    text: { body: text },
-  };
 
   const resp = await safeFetch(url, {
     method: "POST",
@@ -693,19 +733,21 @@ async function sendWhatsAppText(to, text) {
       Authorization: `Bearer ${WHATSAPP_TOKEN}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to,
+      type: "text",
+      text: { body: text },
+    }),
   });
 
   const j = await resp.json();
 
-  if (!resp.ok) {
-    console.log("❌ WhatsApp send failed:", j);
-  } else {
-    console.log("✅ WhatsApp sent:", j?.messages?.[0]?.id || "ok");
-  }
+  if (!resp.ok) console.log("❌ WhatsApp send failed:", j);
+  else console.log("✅ WhatsApp sent:", j?.messages?.[0]?.id || "ok");
 }
 
-// -------------------- HEALTH / DEBUG --------------------
+// -------------------- DEBUG --------------------
 app.get("/", (req, res) => {
   res.status(200).send("HITH is alive ✅");
 });
@@ -720,7 +762,6 @@ app.get("/debug", (req, res) => {
     },
     telegram: {
       enabled: !!TELEGRAM_BOT_TOKEN,
-      path: TG_PATH,
       webhook: PUBLIC_URL ? `${PUBLIC_URL}${TG_PATH}` : null,
     },
     whatsapp: {
@@ -729,13 +770,14 @@ app.get("/debug", (req, res) => {
         WHATSAPP_PHONE_ID &&
         WHATSAPP_VERIFY_TOKEN
       ),
-      path: WA_PATH,
       callback: PUBLIC_URL ? `${PUBLIC_URL}${WA_PATH}` : null,
     },
     supabase: {
       enabled: !!supa,
       prefsTable: SUPABASE_TABLE,
       memoryTable: SUPABASE_MEMORY_TABLE,
+      factsTable: SUPABASE_FACTS_TABLE,
+      projectsTable: SUPABASE_PROJECTS_TABLE,
     },
   });
 });
@@ -743,15 +785,13 @@ app.get("/debug", (req, res) => {
 app.get("/memory-debug/:platform/:userId", async (req, res) => {
   const { platform, userId } = req.params;
 
-  const messages = await getConversationMemory(platform, userId, 10);
-  const facts = await getFactMemory(platform, userId, 10);
-
   res.json({
     ok: true,
     platform,
     userId,
-    messages,
-    facts,
+    conversation: await getConversationMemory(platform, userId, 10),
+    facts: await getFacts(platform, userId, 25),
+    projects: await getProjects(platform, userId, 20),
   });
 });
 
@@ -762,9 +802,9 @@ app.get("/memory-debug/:platform/:userId", async (req, res) => {
 
   app.listen(PORT, async () => {
     console.log(`🚀 Server listening on ${PORT}`);
-    console.log("🌐 PUBLIC_URL base:", PUBLIC_URL || "(missing)");
-    console.log("📌 Telegram webhook path:", TG_PATH);
-    console.log("📌 WhatsApp webhook path:", WA_PATH);
+    console.log("🌐 PUBLIC_URL:", PUBLIC_URL || "(missing)");
+    console.log("📌 Telegram:", TG_PATH);
+    console.log("📌 WhatsApp:", WA_PATH);
 
     if (bot) await setupTelegramWebhook();
   });
