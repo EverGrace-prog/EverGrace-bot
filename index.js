@@ -687,7 +687,16 @@ app.post(WA_PATH, async (req, res) => {
     const value = change?.value;
     const msg = value?.messages?.[0];
 
-    if (!msg) return;
+console.log("📦 WA EVENT:", JSON.stringify(req.body, null, 2));
+
+if (!msg) {
+  console.log("ℹ️ WhatsApp event received, but no message object found.");
+  return;
+}
+
+console.log("💬 WhatsApp message from:", msg.from);
+console.log("💬 WhatsApp type:", msg.type);
+console.log("💬 WhatsApp text:", msg?.text?.body || "(no text)");
 
     const from = String(msg.from || "");
     const text = msg?.text?.body || "";
